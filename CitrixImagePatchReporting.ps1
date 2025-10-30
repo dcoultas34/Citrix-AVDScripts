@@ -1,4 +1,8 @@
-﻿[CmdletBinding()]
+#This script runs on each master image server, this uploads to a central repo, this uploads various csv files of patches and OS updates applied. 
+#Run the script switch to then combine and create a full HTML Report of work completed to the central repository
+
+ 
+ [CmdletBinding()]
 param(
   [string]$ShareRoot = "\\Transfer\transfer\CitrixApps\Citrix Reporting\Image updates",
   [string]$Period    = (Get-Date).ToString("MMMM yyyy"),
@@ -611,3 +615,4 @@ if ($Combine) {
 
   Convert-HtmlToPdf -HtmlPath $combinedHtml -PdfPath $combinedPdf | Out-Null
 }
+
