@@ -25,11 +25,12 @@ $AppsToCheck = @(
     @{ Name="Microsoft Office 365";    LocalMatch="__OFFICE_C2R__";               LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Microsoft.Office" }
 
     # Evergreen-first (vendor data), winget fallback
-    @{ Name="Google Chrome";           LocalMatch="Google Chrome";                LatestProvider="Evergreen"; EvergreenName="GoogleChrome";              WingetId="Google.Chrome" }
+    @{ Name="Google Chrome";           LocalMatch="Google Chrome";                LatestProvider="Evergreen"; EvergreenName="GoogleChrome";               WingetId="Google.Chrome" }
     @{ Name="Microsoft Edge";          LocalMatch="Microsoft Edge";               LatestProvider="Evergreen"; EvergreenName="MicrosoftEdge";              WingetId="Microsoft.Edge" }
-    @{ Name="Visual Studio Code";      LocalMatch="Microsoft Visual Studio Code"; LatestProvider="Evergreen"; EvergreenName="MicrosoftVisualStudioCode"; WingetId="Microsoft.VisualStudioCode" }
-    @{ Name="Power BI Desktop";        LocalMatch="Microsoft Power BI Desktop";   LatestProvider="Evergreen"; EvergreenName="MicrosoftPowerBIDesktop";    WingetId="Microsoft.PowerBI" }
-    @{ Name="Visual Studio";           LocalMatch="Microsoft Visual Studio";      LatestProvider="Evergreen"; EvergreenName="MicrosoftVisualStudio";      WingetId="Microsoft.VisualStudio" }
+    @{ Name="Visual Studio Code";      LocalMatch="Microsoft Visual Studio Code"; LatestProvider="Evergreen"; EvergreenName="MicrosoftVisualStudioCode";  WingetId="Microsoft.VisualStudioCode" }
+    @{ Name="Power BI Desktop";        LocalMatch="Microsoft Power BI Desktop";   LatestProvider="Evergreen"; EvergreenName="MicrosoftPowerBIDesktop";    WingetId="Microsoft.PowerBI" 
+    @{ Name="Visual Studio";           LocalMatch="Visual Studio 2022";            LatestProvider="Evergreen"; EvergreenName="MicrosoftVisualStudio";     WingetId="Microsoft.VisualStudio.2022.Community" }
+
 
 
     # Winget for latest
@@ -183,7 +184,8 @@ function Get-InstalledAppVersion {
         }
     }
     if ($candidates.Count -eq 0) { return $null }
-    ($candidates | Sort-Object @{e="Score";Descending=$true}, @{e="VersionObj";Descending=$true} | Select-Object -First 1).DisplayVersion
+   ($candidates | Sort-Object @{e="VersionObj";Descending=$true}, @{e="Score";Descending=$true} | Select-Object -First 1).DisplayVersion
+
 }
 
 # ---------------- Latest version (forces winget source) ----------------
@@ -629,4 +631,5 @@ if ($Upgrade) {
         else { Write-Host "Still not fully green; HTML not generated. ($($issuesPost.Count) item(s) still need attention.)" -ForegroundColor DarkYellow }
     }
 }
+
 
