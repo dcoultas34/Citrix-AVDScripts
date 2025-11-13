@@ -386,19 +386,23 @@ function Install-AppEvergreen {
       [switch]$WhatIf
     )
     $asset = Get-EvergreenAsset -EvergreenName $EvergreenName
-    if (-not $asset -or -not $asset.Uri) { return [pscustomobject]@{ Used="Evergreen"; Result="NoAsset"; ExitCode=-1 } }
+    if (-not $asset -or -not $asset.Uri) {
+        return [pscustomobject]@{ Used="Evergreen"; Result="NoAsset"; ExitCode=-1 }
+    }
     $uri  = $asset.Uri
     $file = Join-Path $DownloadDir ([IO.Path]::GetFileName((($uri -split '\?')[0])))
 
-    Write-Host "$AppDisplayName: downloading from $uri" -ForegroundColor DarkCyan
+    # FIXED: use -f formatting instead of "$AppDisplayName: ..."
+    Write-Host ("{0}: downloading from {1}" -f $AppDisplayName,$uri) -ForegroundColor DarkCyan
     if ($WhatIf) {
-        Write-Host "WhatIf: would download to $file" -ForegroundColor Gray
+        Write-Host ("WhatIf: would download to {0}" -f $file) -ForegroundColor Gray
     } else {
         try {
             try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
             Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile $file -ErrorAction Stop
         } catch {
-            Write-Warning "$AppDisplayName: download failed: $($_.Exception.Message)"
+            # FIXED
+            Write-Warning ("{0}: download failed: {1}" -f $AppDisplayName,$_.Exception.Message)
             return [pscustomobject]@{ Used="Evergreen"; Result="DownloadFailed"; ExitCode=-1 }
         }
     }
@@ -407,7 +411,7 @@ function Install-AppEvergreen {
     if ($ext -eq ".msi") {
         $args = "/i `"$file`" /qn /norestart"
         if ($WhatIf) {
-            Write-Host "WhatIf: msiexec $args" -ForegroundColor Gray
+            Write-Host ("WhatIf: msiexec {0}" -f $args) -ForegroundColor Gray
             return [pscustomobject]@{ Used="Evergreen"; Result="WouldRun"; ExitCode=0 }
         }
         $p = Start-Process msiexec -ArgumentList $args -Wait -PassThru -NoNewWindow
@@ -418,11 +422,12 @@ function Install-AppEvergreen {
         if ($EvergreenSilentArgs.ContainsKey($EvergreenName)) {
             $exeArgs = "$($EvergreenSilentArgs[$EvergreenName])"
         } else {
-            Write-Host "$AppDisplayName: unknown silent args for Evergreen EXE; will fall back to winget." -ForegroundColor Yellow
+            # FIXED
+            Write-Host ("{0}: unknown silent args for Evergreen EXE; will fall back to winget." -f $AppDisplayName) -ForegroundColor Yellow
             return [pscustomobject]@{ Used="Evergreen"; Result="UnknownExeArgs"; ExitCode=-1; File=$file }
         }
         if ($WhatIf) {
-            Write-Host "WhatIf: `"$file`" $exeArgs" -ForegroundColor Gray
+            Write-Host ("WhatIf: `"{0}`" {1}" -f $file,$exeArgs) -ForegroundColor Gray
             return [pscustomobject]@{ Used="Evergreen"; Result="WouldRun"; ExitCode=0 }
         }
         $p = Start-Process -FilePath $file -ArgumentList $exeArgs -Wait -PassThru -NoNewWindow
@@ -432,6 +437,7 @@ function Install-AppEvergreen {
         [pscustomobject]@{ Used="Evergreen"; Result="UnsupportedType"; ExitCode=-1 }
     }
 }
+
 
 # --------- Office & Teams helpers ---------
 function Update-OfficeC2R {
@@ -850,3 +856,4 @@ if ($Upgrade) {
         }
     }
 }
+
