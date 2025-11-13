@@ -1,4 +1,7 @@
-﻿param(
+#This script will check the belowe defined apps and update each to the latest version of evergreen
+ 
+ 
+ param(
   [switch]$Upgrade,                 # perform upgrades (installed apps only)
   [switch]$IncludeWindowsUpdate,    # try OS updates (requires PSWindowsUpdate)
   [switch]$WindowsUpdateOnly,       # do only Windows Updates, skip app upgrades
@@ -626,3 +629,4 @@ if ($Upgrade) {
         else { Write-Host "Still not fully green; HTML not generated. ($($issuesPost.Count) item(s) still need attention.)" -ForegroundColor DarkYellow }
     }
 }
+
