@@ -1,7 +1,6 @@
 #This script will check the belowe defined apps and update each to the latest version of evergreen
- 
- 
- param(
+
+param(
   [switch]$Upgrade,                 # perform upgrades (installed apps only)
   [switch]$IncludeWindowsUpdate,    # try OS updates (requires PSWindowsUpdate)
   [switch]$WindowsUpdateOnly,       # do only Windows Updates, skip app upgrades
@@ -25,13 +24,11 @@ $AppsToCheck = @(
     @{ Name="Microsoft Office 365";    LocalMatch="__OFFICE_C2R__";               LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Microsoft.Office" }
 
     # Evergreen-first (vendor data), winget fallback
-    @{ Name="Google Chrome";           LocalMatch="Google Chrome";                LatestProvider="Evergreen"; EvergreenName="GoogleChrome";               WingetId="Google.Chrome" }
+    @{ Name="Google Chrome";           LocalMatch="Google Chrome";                LatestProvider="Evergreen"; EvergreenName="GoogleChrome";              WingetId="Google.Chrome" }
     @{ Name="Microsoft Edge";          LocalMatch="Microsoft Edge";               LatestProvider="Evergreen"; EvergreenName="MicrosoftEdge";              WingetId="Microsoft.Edge" }
-    @{ Name="Visual Studio Code";      LocalMatch="Microsoft Visual Studio Code"; LatestProvider="Evergreen"; EvergreenName="MicrosoftVisualStudioCode";  WingetId="Microsoft.VisualStudioCode" }
-    @{ Name="Power BI Desktop";        LocalMatch="Microsoft Power BI Desktop";   LatestProvider="Evergreen"; EvergreenName="MicrosoftPowerBIDesktop";    WingetId="Microsoft.PowerBI" 
-    @{ Name="Visual Studio";           LocalMatch="Visual Studio 2022";            LatestProvider="Evergreen"; EvergreenName="MicrosoftVisualStudio";     WingetId="Microsoft.VisualStudio.2022.Community" }
-
-
+    @{ Name="Visual Studio Code";      LocalMatch="Microsoft Visual Studio Code"; LatestProvider="Evergreen"; EvergreenName="MicrosoftVisualStudioCode"; WingetId="Microsoft.VisualStudioCode" }
+    @{ Name="Power BI Desktop";        LocalMatch="Microsoft Power BI Desktop";   LatestProvider="Evergreen"; EvergreenName="MicrosoftPowerBIDesktop";    WingetId="Microsoft.PowerBI" }
+    @{ Name="Visual Studio";           LocalMatch="Microsoft Visual Studio";      LatestProvider="Evergreen"; EvergreenName="MicrosoftVisualStudio";      WingetId="Microsoft.VisualStudio" }
 
     # Winget for latest
     @{ Name="Adobe Acrobat Reader";    LocalMatch="Adobe Acrobat Reader";         LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Adobe.Acrobat.Reader.64-bit" }
@@ -112,6 +109,53 @@ function Get-VSCodeVersion {
     return $null
 }
 
+function Get-VisualStudioVersion {
+    param(
+        [int]$MajorVersion = 17  # VS 2022
+    )
+
+    $roots = @(
+        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+    )
+
+    $candidates = @()
+
+    foreach ($rt in $roots) {
+        if (-not (Test-Path $rt)) { continue }
+        foreach ($sub in Get-ChildItem $rt -ErrorAction SilentlyContinue) {
+            $p = Get-ItemProperty $sub.PSPath -ErrorAction SilentlyContinue
+            if (-not $p) { continue }
+
+            # VS 2022 has VersionMajor = 17
+            if ($null -eq $p.VersionMajor -or $p.VersionMajor -ne $MajorVersion) { continue }
+
+            $dn = $p.DisplayName
+            if (-not $dn) { continue }
+
+            # Accept names that clearly belong to VS (e.g. 'Visual Studio ...' or 'vs_communityx64msi')
+            if ($dn -notmatch 'Visual Studio' -and $dn -notmatch '^vs_.*') { continue }
+
+            $dv = $p.DisplayVersion
+            $vObj = $null
+            if ($dv) {
+                try { $vObj = [version]($dv -replace '[^\d\.]','') } catch {}
+            }
+
+            $candidates += [pscustomobject]@{
+                DisplayName    = $dn
+                DisplayVersion = $dv
+                VersionObj     = $vObj
+                KeyPath        = $sub.PSPath
+            }
+        }
+    }
+
+    if ($candidates.Count -eq 0) { return $null }
+    ($candidates | Sort-Object @{e="VersionObj";Descending=$true} | Select-Object -First 1).DisplayVersion
+}
+
 # ---------------- Installed version (smart) ----------------
 function Get-InstalledAppVersion {
     param(
@@ -136,6 +180,13 @@ function Get-InstalledAppVersion {
         $key = "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration"
         if (Test-Path $key) { $v = (Get-ItemProperty $key -ErrorAction SilentlyContinue).VersionToReport; if ($v) { return $v } }
         return $null
+    }
+
+    # --- Visual Studio 2022 — use dedicated helper based on VersionMajor ---
+    if ($DisplayNameMatch -eq "Microsoft Visual Studio") {
+        $vsver = Get-VisualStudioVersion -MajorVersion 17
+        if ($vsver) { return $vsver }
+        # fall through to generic registry scan if helper fails
     }
 
     # --- VS Code — prefer Code.exe file version ---
@@ -184,8 +235,9 @@ function Get-InstalledAppVersion {
         }
     }
     if ($candidates.Count -eq 0) { return $null }
-   ($candidates | Sort-Object @{e="VersionObj";Descending=$true}, @{e="Score";Descending=$true} | Select-Object -First 1).DisplayVersion
 
+    # Sort primarily by Version, then by Score (so newest wins)
+    ($candidates | Sort-Object @{e="VersionObj";Descending=$true}, @{e="Score";Descending=$true} | Select-Object -First 1).DisplayVersion
 }
 
 # ---------------- Latest version (forces winget source) ----------------
@@ -631,5 +683,3 @@ if ($Upgrade) {
         else { Write-Host "Still not fully green; HTML not generated. ($($issuesPost.Count) item(s) still need attention.)" -ForegroundColor DarkYellow }
     }
 }
-
-
