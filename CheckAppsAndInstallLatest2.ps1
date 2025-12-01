@@ -1,4 +1,4 @@
-# This script will check the below defined apps and update each to the latest version of evergreen
+# This script will check the below defined apps and update each to the latest version of evergreen run with update switches script
 
 param(
   [switch]$Upgrade,                 # perform upgrades (installed apps only)
@@ -856,4 +856,5 @@ if ($Upgrade) {
         }
     }
 }
+
 
