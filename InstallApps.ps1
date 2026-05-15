@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$ShareRoot = "\\transfer\transfer\CitrixApps",
     [switch]$WhatIf,
@@ -171,6 +171,52 @@ foreach ($item in $manifest) {
     else {
         Write-Log "$app failed. Before: $installedBefore After: $installedAfter ExitCode: $exitCode"
     }
+}
+
+# =====================================================
+# Cleanup downloaded installers
+# =====================================================
+
+Write-Host ""
+Write-Host "Cleaning up downloaded installer files..." -ForegroundColor Cyan
+
+try {
+
+    $manifest = Import-Csv $ManifestPath
+
+    foreach ($item in $manifest) {
+
+        $filePath = $item.FilePath
+
+        if ($filePath -and $filePath -ne "-" -and (Test-Path $filePath)) {
+
+            try {
+                Remove-Item -Path $filePath -Force -ErrorAction Stop
+                Write-Log "Removed installer: $filePath"
+            }
+            catch {
+                Write-Log "WARNING: Failed to remove installer: $filePath"
+            }
+        }
+    }
+
+    # Remove empty directories
+    Get-ChildItem -Path $ShareRoot -Directory -Recurse |
+        Sort-Object FullName -Descending |
+        ForEach-Object {
+
+            try {
+                if ((Get-ChildItem $_.FullName -Force | Measure-Object).Count -eq 0) {
+                    Remove-Item $_.FullName -Force
+                    Write-Log "Removed empty folder: $($_.FullName)"
+                }
+            }
+            catch {}
+        }
+
+}
+catch {
+    Write-Log "WARNING: Cleanup process encountered an error - $($_.Exception.Message)"
 }
 
 Write-Host ""
