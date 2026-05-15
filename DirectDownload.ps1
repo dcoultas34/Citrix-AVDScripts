@@ -1,26 +1,10 @@
-﻿# Download-CitrixApps-Direct.ps1
-
-
 [CmdletBinding()]
 param(
-    [string]$ShareRoot = "C:\AppUpdates",
+    [string]$ShareRoot = "\\transfer\transfer\CitrixApps",
     [switch]$WhatIf
 )
 
-# =====================================================
-# Direct vendor download URLs
-# =====================================================
-# NOTE:
-# Some vendors use permanent redirect links which always
-# point to the latest release.
-#
-# Teams intentionally excluded for now because Microsoft
-# changes packaging/service model frequently.
-# Office 365 and Windows Updates also excluded.
-# =====================================================
-
 $Apps = @(
-
     @{
         Name = "Google Chrome"
         Url  = "https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi"
@@ -41,7 +25,7 @@ $Apps = @(
 
     @{
         Name = "Power BI Desktop"
-        Url  = "https://download.microsoft.com/download/9/5/A/95A641C1-7D0F-4F9D-B9BE-8C3F4E708AA4/PBIDesktopSetup_x64.exe"
+        Url  = "https://www.microsoft.com/en-us/download/details.aspx?id=58494"
         File = "PBIDesktopSetup_x64.exe"
     }
 
@@ -70,30 +54,20 @@ $Apps = @(
     }
 )
 
-# =====================================================
-# Paths
-# =====================================================
-
 $LogPath      = Join-Path $ShareRoot "DownloadLog.txt"
 $ManifestPath = Join-Path $ShareRoot "CitrixAppsManifest.csv"
 $Manifest     = @()
-
-# =====================================================
-# Functions
-# =====================================================
 
 function Write-Log {
     param([string]$Message)
 
     $line = "{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
-
     Write-Host $Message
     Add-Content -Path $LogPath -Value $line
 }
 
 function Get-SafeFolderName {
     param([string]$Name)
-
     return ($Name -replace '[\\/:*?"<>|]', '').Trim()
 }
 
@@ -109,9 +83,64 @@ function Get-FileVersion {
     return "Unknown"
 }
 
-# =====================================================
-# Startup
-# =====================================================
+function Resolve-PowerBiDownloadUrl {
+    param([string]$DownloadPageUrl)
+
+    $page = Invoke-WebRequest `
+        -Uri $DownloadPageUrl `
+        -UseBasicParsing `
+        -MaximumRedirection 10 `
+        -ErrorAction Stop
+
+    $realUrl = ($page.Links |
+        Where-Object { $_.href -match "PBIDesktopSetup_x64\.exe" } |
+        Select-Object -First 1 -ExpandProperty href)
+
+    if (-not $realUrl) {
+        $realUrl = ($page.Content -split '"' |
+            Where-Object { $_ -match "https://download\.microsoft\.com/.+PBIDesktopSetup_x64\.exe" } |
+            Select-Object -First 1)
+    }
+
+    if (-not $realUrl) {
+        throw "Could not resolve Power BI Desktop x64 download URL from Microsoft Download Center."
+    }
+
+    return $realUrl
+}
+
+function Invoke-AppDownload {
+    param(
+        [string]$Name,
+        [string]$Url,
+        [string]$TargetFile
+    )
+
+    if ($Name -eq "Power BI Desktop") {
+        Write-Host "Resolving Power BI Desktop download URL..." -ForegroundColor DarkGray
+        $Url = Resolve-PowerBiDownloadUrl -DownloadPageUrl $Url
+        Write-Host "Resolved Power BI URL: $Url" -ForegroundColor DarkGray
+    }
+
+    Invoke-WebRequest `
+        -Uri $Url `
+        -OutFile $TargetFile `
+        -UseBasicParsing `
+        -MaximumRedirection 10 `
+        -ErrorAction Stop
+
+    $fileInfo = Get-Item $TargetFile -ErrorAction Stop
+
+    if ($Name -eq "Power BI Desktop" -and $fileInfo.Length -lt 100MB) {
+        Remove-Item $TargetFile -Force -ErrorAction SilentlyContinue
+        throw "Power BI download is too small and likely invalid: $($fileInfo.Length) bytes"
+    }
+
+    if ($fileInfo.Length -lt 1KB) {
+        Remove-Item $TargetFile -Force -ErrorAction SilentlyContinue
+        throw "$Name download is too small and likely invalid: $($fileInfo.Length) bytes"
+    }
+}
 
 if (-not (Test-Path $ShareRoot)) {
     New-Item -ItemType Directory -Path $ShareRoot -Force | Out-Null
@@ -119,10 +148,6 @@ if (-not (Test-Path $ShareRoot)) {
 
 Add-Content -Path $LogPath -Value ""
 Add-Content -Path $LogPath -Value "==== Direct vendor download run started: $(Get-Date) ===="
-
-# =====================================================
-# Download loop
-# =====================================================
 
 foreach ($app in $Apps) {
 
@@ -143,21 +168,21 @@ foreach ($app in $Apps) {
     $targetFile = Join-Path $appPath $file
 
     try {
-
         if ($WhatIf) {
-            Write-Host "WhatIf: would download $url" -ForegroundColor Yellow
+            Write-Host "WhatIf: would download $url to $targetFile" -ForegroundColor Yellow
             $status = "WhatIf"
         }
         else {
+            if (Test-Path $targetFile) {
+                Remove-Item $targetFile -Force -ErrorAction SilentlyContinue
+            }
 
             Write-Host "Downloading from: $url" -ForegroundColor DarkGray
 
-            Invoke-WebRequest `
-                -Uri $url `
-                -OutFile $targetFile `
-                -UseBasicParsing `
-                -MaximumRedirection 10 `
-                -ErrorAction Stop
+            Invoke-AppDownload `
+                -Name $name `
+                -Url $url `
+                -TargetFile $targetFile
 
             $status = "Downloaded"
         }
@@ -181,7 +206,6 @@ foreach ($app in $Apps) {
         Write-Log "$name - $status - $version"
     }
     catch {
-
         $Manifest += [pscustomobject]@{
             Application = $name
             Version     = "-"
@@ -195,10 +219,6 @@ foreach ($app in $Apps) {
     }
 }
 
-# =====================================================
-# Export manifest
-# =====================================================
-
 $Manifest |
     Sort-Object Application |
     Export-Csv -NoTypeInformation -Encoding UTF8 -Path $ManifestPath
@@ -208,6 +228,3 @@ Write-Host "Download run complete." -ForegroundColor Green
 Write-Host "Share:    $ShareRoot"
 Write-Host "Manifest: $ManifestPath"
 Write-Host "Log:      $LogPath"
-```
-
-
