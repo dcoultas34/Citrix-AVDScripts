@@ -1,7 +1,8 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$ShareRoot = "\\transfer\transfer\CitrixApps",
-    [switch]$WhatIf
+    [switch]$WhatIf,
+    [switch]$CleanVersionFolder
 )
 
 $AppsToDownload = @(
@@ -16,19 +17,32 @@ $AppsToDownload = @(
     @{ Name="Visual Studio Code";   WingetId="Microsoft.VisualStudioCode" }
 )
 
-$RunDate = Get-Date
-$Manifest = @()
-$LogPath = Join-Path $ShareRoot "DownloadLog.txt"
+$RunDate      = Get-Date
 $ManifestPath = Join-Path $ShareRoot "CitrixAppsManifest.csv"
+$LogPath      = Join-Path $ShareRoot "DownloadLog.txt"
+$Manifest     = @()
+
+function Write-Log {
+    param([string]$Message)
+
+    $line = "{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
+    Write-Host $Message
+    Add-Content -Path $LogPath -Value $line
+}
 
 function Test-WingetReady {
     try {
         $null = Get-Command winget -ErrorAction Stop
-        winget --version | Out-Null
+        $null = winget --version
         return $true
     } catch {
         return $false
     }
+}
+
+function Get-SafeFolderName {
+    param([string]$Name)
+    return ($Name -replace '[\\/:*?"<>|]', '').Trim()
 }
 
 function Get-WingetLatestVersion {
@@ -36,6 +50,10 @@ function Get-WingetLatestVersion {
 
     try {
         $out = winget show --id $WingetId --exact --source winget --accept-source-agreements 2>$null
+
+        if (-not $out) {
+            return $null
+        }
 
         $verLine = ($out -split "`r?`n") |
             Where-Object { $_ -match "^\s*Version\s*:" } |
@@ -49,6 +67,43 @@ function Get-WingetLatestVersion {
     return $null
 }
 
+function Invoke-WingetDownload {
+    param(
+        [string]$WingetId,
+        [string]$TargetFolder,
+        [switch]$WhatIf
+    )
+
+    $args = @(
+        "download",
+        "--id", $WingetId,
+        "--exact",
+        "--source", "winget",
+        "--download-directory", $TargetFolder,
+        "--accept-package-agreements",
+        "--accept-source-agreements"
+    )
+
+    if ($WhatIf) {
+        Write-Log "WhatIf: winget $($args -join ' ')"
+        return 0
+    }
+
+    try {
+        $proc = Start-Process `
+            -FilePath "winget" `
+            -ArgumentList $args `
+            -Wait `
+            -PassThru `
+            -NoNewWindow
+
+        return $proc.ExitCode
+    } catch {
+        Write-Log "ERROR: winget download failed for $WingetId - $($_.Exception.Message)"
+        return -1
+    }
+}
+
 if (-not (Test-WingetReady)) {
     throw "winget is not installed or not working on this machine."
 }
@@ -57,15 +112,17 @@ if (-not (Test-Path $ShareRoot)) {
     New-Item -ItemType Directory -Path $ShareRoot -Force | Out-Null
 }
 
-Add-Content -Path $LogPath -Value "`n==== Citrix app download started: $RunDate ===="
+Add-Content -Path $LogPath -Value ""
+Add-Content -Path $LogPath -Value "==== Citrix app download started: $RunDate ===="
 
 foreach ($app in $AppsToDownload) {
     $name = $app.Name
     $id   = $app.WingetId
 
-    Write-Host "`nProcessing $name..." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Processing $name..." -ForegroundColor Cyan
 
-    $safeName = $name -replace '[\\/:*?"<>|]', ''
+    $safeName  = Get-SafeFolderName -Name $name
     $appFolder = Join-Path $ShareRoot $safeName
 
     if (-not (Test-Path $appFolder)) {
@@ -73,45 +130,75 @@ foreach ($app in $AppsToDownload) {
     }
 
     $latest = Get-WingetLatestVersion -WingetId $id
+
     if (-not $latest) {
-        Write-Warning "$name - could not determine latest version."
-        Add-Content -Path $LogPath -Value "$name - failed to determine latest version."
+        Write-Log "WARNING: $name - could not determine latest version."
+
+        $Manifest += [pscustomobject]@{
+            Application = $name
+            WingetId    = $id
+            Version     = "-"
+            Status      = "Failed - version unknown"
+            ExitCode    = "-"
+            Folder      = $appFolder
+            Files       = "-"
+            Downloaded  = Get-Date
+        }
+
         continue
     }
 
-    $versionFolder = Join-Path $appFolder $latest
+    $safeVersion   = Get-SafeFolderName -Name $latest
+    $versionFolder = Join-Path $appFolder $safeVersion
+
+    if ($CleanVersionFolder -and (Test-Path $versionFolder) -and -not $WhatIf) {
+        Remove-Item -Path $versionFolder -Recurse -Force
+    }
+
     if (-not (Test-Path $versionFolder)) {
         New-Item -ItemType Directory -Path $versionFolder -Force | Out-Null
     }
 
-    $before = Get-ChildItem -Path $versionFolder -Recurse -File -ErrorAction SilentlyContinue
+    $before = @(Get-ChildItem -Path $versionFolder -Recurse -File -ErrorAction SilentlyContinue)
 
-    $args = @(
-        "download",
-        "--id", $id,
-        "--exact",
-        "--source", "winget",
-        "--download-directory", $versionFolder,
-        "--accept-package-agreements",
-        "--accept-source-agreements"
-    )
+    $exitCode = Invoke-WingetDownload `
+        -WingetId $id `
+        -TargetFolder $versionFolder `
+        -WhatIf:$WhatIf
 
-    if ($WhatIf) {
-        Write-Host "WhatIf: winget $($args -join ' ')" -ForegroundColor Yellow
-        $exitCode = 0
-        $status = "WhatIf"
+    $after = @(Get-ChildItem -Path $versionFolder -Recurse -File -ErrorAction SilentlyContinue)
+
+    if ($after.Count -gt 0) {
+        if ($before.Count -gt 0) {
+            $beforeNames = @($before | ForEach-Object { $_.FullName })
+            $afterNames  = @($after  | ForEach-Object { $_.FullName })
+
+            $newFiles = @(
+                Compare-Object `
+                    -ReferenceObject $beforeNames `
+                    -DifferenceObject $afterNames `
+                    -PassThru |
+                Where-Object { $_ }
+            )
+
+            if (-not $newFiles -or $newFiles.Count -eq 0) {
+                $newFiles = $afterNames
+            }
+        } else {
+            $newFiles = @($after | ForEach-Object { $_.FullName })
+        }
     } else {
-        $proc = Start-Process -FilePath "winget" -ArgumentList $args -Wait -PassThru -NoNewWindow
-        $exitCode = $proc.ExitCode
-        $status = if ($exitCode -eq 0) { "Downloaded" } else { "Failed" }
+        $newFiles = @()
     }
 
-    $after = Get-ChildItem -Path $versionFolder -Recurse -File -ErrorAction SilentlyContinue
-    $newFiles = Compare-Object $before.FullName $after.FullName -PassThru |
-        Where-Object { $_ }
-
-    if (-not $newFiles) {
-        $newFiles = $after.FullName
+    if ($WhatIf) {
+        $status = "WhatIf"
+    } elseif ($exitCode -eq 0 -and $after.Count -gt 0) {
+        $status = "Downloaded"
+    } elseif ($exitCode -eq 0 -and $after.Count -eq 0) {
+        $status = "Completed but no files found"
+    } else {
+        $status = "Failed"
     }
 
     $Manifest += [pscustomobject]@{
@@ -121,18 +208,19 @@ foreach ($app in $AppsToDownload) {
         Status      = $status
         ExitCode    = $exitCode
         Folder      = $versionFolder
-        Files       = ($newFiles -join "; ")
+        Files       = if ($newFiles.Count -gt 0) { ($newFiles -join "; ") } else { "-" }
         Downloaded  = Get-Date
     }
 
-    Add-Content -Path $LogPath -Value "$name $latest - $status - ExitCode $exitCode"
+    Write-Log "$name $latest - $status - ExitCode $exitCode"
 }
 
 $Manifest |
     Sort-Object Application |
     Export-Csv -NoTypeInformation -Encoding UTF8 -Path $ManifestPath
 
-Write-Host "`nDownload complete." -ForegroundColor Green
+Write-Host ""
+Write-Host "Download run complete." -ForegroundColor Green
 Write-Host "Share path: $ShareRoot"
 Write-Host "Manifest: $ManifestPath"
 Write-Host "Log: $LogPath"
