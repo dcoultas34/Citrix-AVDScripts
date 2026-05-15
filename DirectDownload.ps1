@@ -210,11 +210,4 @@ Write-Host "Manifest: $ManifestPath"
 Write-Host "Log:      $LogPath"
 ```
 
-## Notes
 
-* This version avoids `winget download` completely.
-* It uses direct vendor download URLs instead.
-* Teams intentionally excluded because Microsoft packaging changes frequently.
-* Office 365 and Windows Updates should be handled separately.
-* Adobe Reader URL will need occasional maintenance because Adobe changes build numbers.
-* The script is designed to stage installers centrally for Citrix image patching.
