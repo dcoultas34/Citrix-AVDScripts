@@ -149,10 +149,28 @@ function Get-FirstPropertyValue {
     $DefaultValue = $null
   )
 
+  # First try exact property-name matches.
   foreach ($name in $PropertyNames) {
     $property = $InputObject.PSObject.Properties[$name]
     if ($property -and $null -ne $property.Value -and -not [string]::IsNullOrWhiteSpace("$($property.Value)")) {
       return $property.Value
+    }
+  }
+
+  # Then compare normalised names. This allows headings such as:
+  # Installed Version, Installed-Version, installed_version and InstalledVersion.
+  $normalisedWanted = @(
+    $PropertyNames | ForEach-Object {
+      ("$_" -replace '[^a-zA-Z0-9]', '').ToLowerInvariant()
+    }
+  )
+
+  foreach ($property in $InputObject.PSObject.Properties) {
+    $normalisedActual = (($property.Name -replace '[^a-zA-Z0-9]', '').ToLowerInvariant())
+    if ($normalisedWanted -contains $normalisedActual) {
+      if ($null -ne $property.Value -and -not [string]::IsNullOrWhiteSpace("$($property.Value)")) {
+        return $property.Value
+      }
     }
   }
 
