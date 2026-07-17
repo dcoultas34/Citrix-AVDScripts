@@ -488,10 +488,13 @@ ul { margin:6px 0 12px 18px; }
     $displayApplication = [string]($rows | Select-Object -First 1 -ExpandProperty Application)
     $versions = @($rows.InstalledAfter | Where-Object { $_ -and $_ -ne '-' } | Select-Object -Unique | Sort-Object)
     $attentionMachines = @($rows | Where-Object { Test-AppNeedsAttention -App $_ } | Select-Object -ExpandProperty Computer -Unique | Sort-Object)
+    $applicationException = Get-ApplicationException -App ($rows | Select-Object -First 1)
 
     $notes = @()
 
-    if ($versions.Count -gt 1) {
+    # Approved application exceptions are also excluded from version-mismatch
+    # warnings in the Items Requiring Attention section.
+    if ($versions.Count -gt 1 -and $null -eq $applicationException) {
       $versionDetails = @(
         $rows |
           Where-Object { $_.InstalledAfter -and $_.InstalledAfter -ne '-' } |
