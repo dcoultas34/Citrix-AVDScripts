@@ -26,7 +26,7 @@ $ErrorActionPreference = 'Stop'
 
   When more than one dated file exists for a computer and report type, the
   newest file is used. Application rows are normalised to Installed Before,
-  Installed After, Latest and Status fields.
+  Installed After and Status fields.
 #>
 
 # ---------------------- Master -> Citrix mapping ----------------------
@@ -189,10 +189,8 @@ function Convert-ToStandardAppRow {
     Application = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Application','Name','DisplayName','App') -DefaultValue 'Unknown application'
     InstalledBefore = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('InstalledBefore','Installed Before','Before','BeforeVersion','PreviousVersion','OriginalVersion') -DefaultValue '-'
     InstalledAfter  = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('InstalledAfter','Installed After','After','AfterVersion','Installed','InstalledVersion','CurrentVersion','Version') -DefaultValue '-'
-    Latest          = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Latest','LatestVersion','AvailableVersion','TargetVersion') -DefaultValue '-'
     Status     = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Status','Result','State') -DefaultValue 'Unknown'
     Css        = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Css','CSS','RowCss') -DefaultValue ''
-    LatestCss  = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('LatestCss','LatestCSS') -DefaultValue ''
   }
 }
 
@@ -250,7 +248,6 @@ th,td { border: 1px solid #ddd; padding: 8px; text-align: left; background:#ffff
 th { background: #f3f3f3; }
 .ok   { color:#2e7d32; font-weight:600; }
 .bad  { color:#c62828; font-weight:600; }
-.info { color:#1d4ed8; font-weight:600; }
 .os-in-month { color:#2e7d32; font-weight:600; }
 .headerline { font-size:18px; font-weight:700; }
 ul { margin: 6px 0 12px 18px; }
@@ -332,29 +329,21 @@ ul { margin: 6px 0 12px 18px; }
     } else { @("<tr><td colspan='3'><em>No updates prior to this month were found.</em></td></tr>") }
 
     $appRows = foreach ($a in $apps) {
-      # Css and LatestCss were present in the original collector output, but some
-      # existing CSV files do not contain those columns. Read them safely and,
-      # when absent, derive the formatting from Status instead.
+      # Css was present in the original collector output, but some existing
+      # CSV files do not contain that column. When absent, derive formatting
+      # from the Status value instead.
       $rowCls = ''
       if ($a.PSObject.Properties['Css']) {
         $rowCls = [string]$a.Css
       }
-      elseif ([string]$a.Status -match 'Update available|Evergreen not available') {
+      elseif ([string]$a.Status -match 'Update available|Evergreen not available|Failed|Error') {
         $rowCls = 'bad'
       }
-      elseif ([string]$a.Status -match 'Latest.*installed|Ahead of') {
+      elseif ([string]$a.Status -match 'Latest.*installed|Ahead of|Success|Updated|No change') {
         $rowCls = 'ok'
       }
 
-      $latestCls = $rowCls
-      if ($a.PSObject.Properties['LatestCss'] -and $a.LatestCss) {
-        $latestCls = [string]$a.LatestCss
-      }
-      elseif ([string]$a.Latest -match 'waiting on Evergreen release') {
-        $latestCls = 'info'
-      }
-
-      "<tr><td class='$rowCls'>$($a.Application)</td><td class='$rowCls'>$($a.InstalledBefore)</td><td class='$rowCls'>$($a.InstalledAfter)</td><td class='$latestCls'>$($a.Latest)</td><td class='$rowCls'>$($a.Status)</td></tr>"
+      "<tr><td class='$rowCls'>$($a.Application)</td><td class='$rowCls'>$($a.InstalledBefore)</td><td class='$rowCls'>$($a.InstalledAfter)</td><td class='$rowCls'>$($a.Status)</td></tr>"
     }
 
 @"
@@ -372,7 +361,7 @@ ul { margin: 6px 0 12px 18px; }
 
   <h3>Applications</h3>
   <table>
-    <thead><tr><th>Application</th><th>Installed Before</th><th>Installed After</th><th>Latest</th><th>Status</th></tr></thead>
+    <thead><tr><th>Application</th><th>Installed Before</th><th>Installed After</th><th>Status</th></tr></thead>
     <tbody>
       $(($appRows -join "`n"))
     </tbody>
@@ -404,7 +393,7 @@ ul { margin: 6px 0 12px 18px; }
 <h1>$Title</h1>
 $headerBlock
 $(($sections -join "`n"))
-<p class='small'>Apps: green = latest installed; red = update available. If Evergreen Stable exists we use it; otherwise winget. If winget is newer than Evergreen, the <em>Latest</em> cell shows that version in <span class='info'>blue</span> with “waiting on Evergreen release”.</p>
+<p class='small'>Apps: the report shows the installed version before and after patching. Green indicates a successful/current result; red indicates an update, failure, or error requiring attention.</p>
 <p class='small'>OS: dates shown as DD/MM/YYYY. We show updates applied <strong>this month</strong> (green) and the <strong>previous 3 updates</strong> excluding this month.</p>
 <p class='small'>Generated: $(Get-Date)</p>
 </body>
