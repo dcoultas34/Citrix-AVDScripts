@@ -180,11 +180,11 @@ ul { margin: 6px 0 12px 18px; }
   $monthStart  = Get-Date -Year $repMonth.Year -Month $repMonth.Month -Day 1 -Hour 0 -Minute 0 -Second 0
   $monthEnd    = $monthStart.AddMonths(1)
 
-  $computers = ($AppData.Computer + $OsData.Computer | Where-Object { $_ } | Select-Object -Unique | Sort-Object)
+  $computers = @($AppData.Computer + $OsData.Computer | Where-Object { $_ } | Select-Object -Unique | Sort-Object)
 
-  $allMasters = ($Map | Select-Object -ExpandProperty Master -Unique | Sort-Object)
-  $presentMasters = $computers | Where-Object { $allMasters -contains $_ } | Sort-Object
-  $missingMasters = $allMasters | Where-Object { $presentMasters -notcontains $_ } | Sort-Object
+  $allMasters = @($Map | Select-Object -ExpandProperty Master -Unique | Sort-Object)
+  $presentMasters = @($computers | Where-Object { $allMasters -contains $_ } | Sort-Object)
+  $missingMasters = @($allMasters | Where-Object { $presentMasters -notcontains $_ } | Sort-Object)
   $countLine = "Master image count: {0} of {1}" -f ($presentMasters.Count), ($allMasters.Count)
   $missingLine = if ($missingMasters.Count -gt 0) { "Please run the report script on: " + ($missingMasters -join ', ') } else { "" }
 
@@ -198,13 +198,13 @@ ul { margin: 6px 0 12px 18px; }
   $sections = foreach ($comp in $computers) {
     $apps = $AppData | Where-Object { $_.Computer -eq $comp -and $_.Status -ne 'Application not installed' } | Sort-Object Application
 
-    $osMonth = $OsData | Where-Object {
+    $osMonth = @($OsData | Where-Object {
       $_.Computer -eq $comp -and $_.InstalledOn -ge $monthStart -and $_.InstalledOn -lt $monthEnd
-    } | Sort-Object InstalledOn -Descending
+    } | Sort-Object InstalledOn -Descending)
 
-    $osPrev3 = $OsData | Where-Object {
+    $osPrev3 = @($OsData | Where-Object {
       $_.Computer -eq $comp -and $_.InstalledOn -lt $monthStart
-    } | Sort-Object InstalledOn -Descending | Select-Object -First 3
+    } | Sort-Object InstalledOn -Descending | Select-Object -First 3)
 
     $rows = $Map | Where-Object { $_.Master -ieq $comp }
     $envs = ($rows.Environment | ForEach-Object { "$_".Trim() } | Select-Object -Unique) -join ', '
