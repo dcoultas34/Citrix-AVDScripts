@@ -26,7 +26,8 @@ $ErrorActionPreference = 'Stop'
 
   When more than one dated file exists for a computer and report type, the
   newest file is used. Application rows are normalised to Installed Before,
-  Installed After and Status fields.
+  Installed After and Status fields. Application comparison uses the complete
+  application name, so similarly named products remain separate.
 #>
 
 # ---------------------- Master -> Citrix mapping ----------------------
@@ -198,6 +199,30 @@ function Convert-ToHtmlSafe {
   return [System.Net.WebUtility]::HtmlEncode([string]$Value)
 }
 
+function Get-ApplicationIdentityKey {
+  param(
+    [Parameter(Mandatory)]
+    [string]$Application
+  )
+
+  # Match applications using the complete application name only.
+  # We normalise harmless formatting differences such as repeated whitespace
+  # and letter case, but never use partial, prefix, contains, or fuzzy matching.
+  #
+  # Therefore these remain separate:
+  #   Adobe Acrobat
+  #   Adobe Acrobat Reader
+  #   Git for Windows
+  #   GitHub Desktop (machine)
+  $name = (Convert-ToPlainText $Application)
+  if ([string]::IsNullOrWhiteSpace($name)) {
+    return 'unknown application'
+  }
+
+  $name = [regex]::Replace($name.Trim(), '\s+', ' ')
+  return $name.ToLowerInvariant()
+}
+
 function Test-AppNeedsAttention {
   param($App)
 
@@ -219,6 +244,47 @@ function Get-AppDisplayStatus {
   if (Test-AppNeedsAttention -App $App) { return 'Requires attention' }
   if ([string]$App.InstalledBefore -ne [string]$App.InstalledAfter) { return 'Updated' }
   return 'Already current'
+}
+
+function Get-AppStatusReason {
+  param($App)
+
+  $sourceStatus = ([string]$App.Status).Trim()
+  $before = ([string]$App.InstalledBefore).Trim()
+  $after  = ([string]$App.InstalledAfter).Trim()
+
+  if ([string]::IsNullOrWhiteSpace($after) -or $after -eq '-') {
+    return 'The post-patching installed version could not be determined.'
+  }
+
+  if ($sourceStatus -match '(?i)update available') {
+    if ($sourceStatus -match '(?i)latest\s+([0-9][0-9A-Za-z\.\-_]+)') {
+      return "An update is available. Latest reported version: $($Matches[1])."
+    }
+    return 'An update is available, but the newer version was not installed.'
+  }
+
+  if ($sourceStatus -match '(?i)could not query|unable to query|feed.*(failed|unavailable)|verification failed') {
+    return 'Version compliance could not be verified because the update source could not be queried.'
+  }
+
+  if ($sourceStatus -match '(?i)failed|failure|error') {
+    return "The source report recorded an update error: $sourceStatus"
+  }
+
+  if ($sourceStatus -match '(?i)unknown|not available') {
+    return "The source report could not determine compliance: $sourceStatus"
+  }
+
+  if ($sourceStatus -match '(?i)requires attention') {
+    return $sourceStatus
+  }
+
+  if ($before -ne $after) {
+    return 'Successfully updated during this patching cycle.'
+  }
+
+  return 'No update was required; the installed version remained current.'
 }
 
 function Convert-ToStandardAppRow {
@@ -348,20 +414,44 @@ ul { margin:6px 0 12px 18px; }
 
   # Only flag genuine inconsistencies. An application being absent from an
   # image is intentionally ignored because each image can have a different role.
-  $consistencyRows = foreach ($group in ($reportApps | Group-Object Application | Sort-Object Name)) {
+  $applicationGroups = @(
+    $reportApps |
+      Group-Object -Property { Get-ApplicationIdentityKey -Application ([string]$_.Application) } |
+      Sort-Object {
+        $firstRow = @($_.Group)[0]
+        [string]$firstRow.Application
+      }
+  )
+
+  $consistencyRows = foreach ($group in $applicationGroups) {
     $rows = @($group.Group)
+    $displayApplication = [string]($rows | Select-Object -First 1 -ExpandProperty Application)
     $versions = @($rows.InstalledAfter | Where-Object { $_ -and $_ -ne '-' } | Select-Object -Unique | Sort-Object)
     $attentionMachines = @($rows | Where-Object { Test-AppNeedsAttention -App $_ } | Select-Object -ExpandProperty Computer -Unique | Sort-Object)
 
     $notes = @()
-    if ($versions.Count -gt 1) { $notes += 'Different post-patching versions across images' }
-    if ($attentionMachines.Count -gt 0) { $notes += ('Requires attention on: ' + ($attentionMachines -join ', ')) }
+
+    if ($versions.Count -gt 1) {
+      $versionDetails = @(
+        $rows |
+          Where-Object { $_.InstalledAfter -and $_.InstalledAfter -ne '-' } |
+          Sort-Object Computer |
+          ForEach-Object { "$($_.Computer): $($_.InstalledAfter)" }
+      )
+      $notes += ('Version mismatch after patching — ' + ($versionDetails -join '; '))
+    }
+
+    foreach ($attentionRow in ($rows | Where-Object { Test-AppNeedsAttention -App $_ } | Sort-Object Computer)) {
+      $reason = Get-AppStatusReason -App $attentionRow
+      $notes += ("$($attentionRow.Computer): $reason")
+    }
 
     # Do not add a row when the application is consistent. This keeps the
     # review section focused only on items that genuinely need investigation.
     if ($notes.Count -gt 0) {
       $noteClass = if ($attentionMachines.Count -gt 0) { 'bad' } else { 'amber' }
-      "<tr><td>$(Convert-ToHtmlSafe $group.Name)</td><td>$(Convert-ToHtmlSafe ($versions -join ', '))</td><td class='$noteClass'>$(Convert-ToHtmlSafe ($notes -join '; '))</td></tr>"
+      $noteHtml = ($notes | ForEach-Object { '<div>' + (Convert-ToHtmlSafe $_) + '</div>' }) -join ''
+      "<tr><td>$(Convert-ToHtmlSafe $displayApplication)</td><td>$(Convert-ToHtmlSafe ($versions -join ', '))</td><td class='$noteClass'>$noteHtml</td></tr>"
     }
   }
   $consistencyRows = @($consistencyRows | Where-Object { $_ })
@@ -441,9 +531,10 @@ ul { margin:6px 0 12px 18px; }
       $changed = [string]$a.InstalledBefore -ne [string]$a.InstalledAfter
       $rowClass = if ($attention) { 'row-attention' } elseif ($changed) { 'row-updated' } else { 'row-current' }
       $displayStatus = Get-AppDisplayStatus -App $a
+      $statusReason = Get-AppStatusReason -App $a
       $statusClass = if ($attention) { 'status-red' } elseif ($changed) { 'status-green' } else { 'status-green' }
 
-      "<tr class='$rowClass'><td>$(Convert-ToHtmlSafe $a.Application)</td><td>$(Convert-ToHtmlSafe $a.InstalledBefore)</td><td>$(Convert-ToHtmlSafe $a.InstalledAfter)</td><td><span class='status-pill $statusClass'>$displayStatus</span></td></tr>"
+      "<tr class='$rowClass'><td>$(Convert-ToHtmlSafe $a.Application)</td><td>$(Convert-ToHtmlSafe $a.InstalledBefore)</td><td>$(Convert-ToHtmlSafe $a.InstalledAfter)</td><td><span class='status-pill $statusClass'>$displayStatus</span></td><td>$(Convert-ToHtmlSafe $statusReason)</td></tr>"
     }
 
     $fmt = 'dd/MM/yyyy'
@@ -474,7 +565,7 @@ ul { margin:6px 0 12px 18px; }
 
   <h3>Applications</h3>
   <table>
-    <thead><tr><th>Application</th><th>Installed Before</th><th>Installed After</th><th>Status</th></tr></thead>
+    <thead><tr><th>Application</th><th>Installed Before</th><th>Installed After</th><th>Status</th><th>Reason</th></tr></thead>
     <tbody>$(($appRows -join "`n"))</tbody>
   </table>
 
@@ -501,7 +592,7 @@ ul { margin:6px 0 12px 18px; }
 <h1>$(Convert-ToHtmlSafe $Title)</h1>
 $headerBlock
 $(($sections -join "`n"))
-<p class='small'>Application rows: light green = updated, white = already current, light red = requires attention. The Status column is derived from the before/after result and the source status.</p>
+<p class='small'>Application rows: light green = updated, white = already current, light red = requires attention. The Reason column explains the result, including why an item requires attention.</p>
 <p class='small'>The attention review ignores applications that are intentionally absent from particular images. It only flags differing post-patch versions and results that require investigation.</p>
 <p class='small'>OS dates use DD/MM/YYYY. The report shows updates applied during the selected month and the previous three updates.</p>
 <p class='small'>Generated: $generated</p>
