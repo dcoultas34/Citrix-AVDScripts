@@ -27,7 +27,7 @@ $ErrorActionPreference = 'Stop'
   When more than one dated file exists for a computer and report type, the
   newest file is used. Application rows are normalised to Installed Before,
   Installed After and Status fields. Application comparison uses the complete
-  application name, so similarly named products remain separate. Approved application exceptions, such as Azure Data Studio and Zoom Outlook Plugin, are treated as compliant. Adobe Acrobat Reader is excluded while Adobe Acrobat remains included.
+  application name, so similarly named products remain separate. Approved application exceptions, such as Azure Data Studio, Zoom Outlook Plugin and OneDrive Enterprise ring, are treated as compliant. Adobe Acrobat Reader is excluded while Adobe Acrobat remains included.
 #>
 
 # ---------------------- Master -> Citrix mapping ----------------------
@@ -76,6 +76,16 @@ $ApplicationExceptions = @{
   'zoom outlook plugin' = @{
     DisplayStatus = 'Current'
     Reason        = 'This application is approved and is treated as current.'
+  }
+
+  'microsoft onedrive' = @{
+    DisplayStatus = 'Current'
+    Reason        = 'The reported version is from the Enterprise ring rather than the Production ring. This is expected and is treated as current.'
+  }
+
+  'onedrive' = @{
+    DisplayStatus = 'Current'
+    Reason        = 'The reported version is from the Enterprise ring rather than the Production ring. This is expected and is treated as current.'
   }
 }
 
