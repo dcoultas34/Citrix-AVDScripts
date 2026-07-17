@@ -27,7 +27,7 @@ $ErrorActionPreference = 'Stop'
   When more than one dated file exists for a computer and report type, the
   newest file is used. Application rows are normalised to Installed Before,
   Installed After and Status fields. Application comparison uses the complete
-  application name, so similarly named products remain separate.
+  application name, so similarly named products remain separate. Approved application exceptions, such as Azure Data Studio, are treated as compliant.
 #>
 
 # ---------------------- Master -> Citrix mapping ----------------------
@@ -63,6 +63,16 @@ $CatalogMap = @(
   @{ Name='Windows 10 Multi Session UK South Standard Non-Prod IT UAT'; Master='UKST1MICTXMI3U'; Type='Multi Session' }
 
 ) | ForEach-Object { [pscustomobject]$_ }
+
+# ---------------------- Approved application exceptions ----------------------
+# These applications are deliberately treated as compliant regardless of the
+# source CSV status. Matching uses the complete application name only.
+$ApplicationExceptions = @{
+  'azure data studio' = @{
+    DisplayStatus = 'Pass'
+    Reason        = 'No further updates are available for this application.'
+  }
+}
 
 # ---------------------- Network-share input ----------------------
 function Get-ComputerNameFromReportFile {
@@ -223,8 +233,28 @@ function Get-ApplicationIdentityKey {
   return $name.ToLowerInvariant()
 }
 
+function Get-ApplicationException {
+  param($App)
+
+  $applicationName = [string]$App.Application
+  if ([string]::IsNullOrWhiteSpace($applicationName)) {
+    return $null
+  }
+
+  $key = Get-ApplicationIdentityKey -Application $applicationName
+  if ($ApplicationExceptions.ContainsKey($key)) {
+    return $ApplicationExceptions[$key]
+  }
+
+  return $null
+}
+
 function Test-AppNeedsAttention {
   param($App)
+
+  if ($null -ne (Get-ApplicationException -App $App)) {
+    return $false
+  }
 
   $status = [string]$App.Status
   if ($status -match '(?i)update available|failed|failure|error|unknown|not available|could not query|requires attention') {
@@ -241,6 +271,11 @@ function Test-AppNeedsAttention {
 function Get-AppDisplayStatus {
   param($App)
 
+  $exception = Get-ApplicationException -App $App
+  if ($null -ne $exception) {
+    return [string]$exception.DisplayStatus
+  }
+
   if (Test-AppNeedsAttention -App $App) { return 'Requires attention' }
   if ([string]$App.InstalledBefore -ne [string]$App.InstalledAfter) { return 'Updated' }
   return 'Already current'
@@ -248,6 +283,11 @@ function Get-AppDisplayStatus {
 
 function Get-AppStatusReason {
   param($App)
+
+  $exception = Get-ApplicationException -App $App
+  if ($null -ne $exception) {
+    return [string]$exception.Reason
+  }
 
   $sourceStatus = ([string]$App.Status).Trim()
   $before = ([string]$App.InstalledBefore).Trim()
@@ -532,7 +572,7 @@ ul { margin:6px 0 12px 18px; }
       $rowClass = if ($attention) { 'row-attention' } elseif ($changed) { 'row-updated' } else { 'row-current' }
       $displayStatus = Get-AppDisplayStatus -App $a
       $statusReason = Get-AppStatusReason -App $a
-      $statusClass = if ($attention) { 'status-red' } elseif ($changed) { 'status-green' } else { 'status-green' }
+      $statusClass = if ($attention) { 'status-red' } else { 'status-green' }
 
       "<tr class='$rowClass'><td>$(Convert-ToHtmlSafe $a.Application)</td><td>$(Convert-ToHtmlSafe $a.InstalledBefore)</td><td>$(Convert-ToHtmlSafe $a.InstalledAfter)</td><td><span class='status-pill $statusClass'>$displayStatus</span></td><td>$(Convert-ToHtmlSafe $statusReason)</td></tr>"
     }
