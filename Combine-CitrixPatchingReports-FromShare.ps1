@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
   [string]$ShareRoot = "\\stprodukstcitrix01.file.core.windows.net\profiles\Citrix Reporting\Image Updates",
   [string]$Period    = (Get-Date).ToString("MMMM yyyy"),
@@ -20,9 +20,9 @@ $ErrorActionPreference = 'Stop'
   CIM/WMI, Evergreen, winget, or Adobe web feeds.
 
   It only reads these existing files from the selected network-share folder:
-    * <Computer> AppStatus <date>.csv
-    * <Computer> OSUpdates <date>.csv
-    * <Computer> OSInfo <date>.csv
+    * <Computer>-AppStatus-<date>.csv
+    * <Computer>-OSUpdates-<date>.csv
+    * <Computer>-OSInfo-<date>.csv
 
   When more than one dated file exists for a computer and report type, the
   newest file is used.
@@ -70,10 +70,10 @@ function Get-ComputerNameFromReportFile {
   )
 
   $escapedType = [regex]::Escape($ReportType)
-  if ($File.BaseName -match "^(?<Computer>.+?)\s+$escapedType\s+\d{4}-\d{2}-\d{2}$") {
+  if ($File.BaseName -match "^(?<Computer>.+?)-$escapedType-\d{4}-\d{2}-\d{2}$") {
     return $Matches.Computer.Trim()
   }
-  if ($File.BaseName -match "^(?<Computer>.+?)\s+$escapedType(?:\s+.*)?$") {
+  if ($File.BaseName -match "^(?<Computer>.+?)-$escapedType(?:-.*)?$") {
     return $Matches.Computer.Trim()
   }
   return $null
@@ -89,7 +89,7 @@ function Get-LatestReportFiles {
   $params = @{
     Path        = $Folder
     File        = $true
-    Filter      = "* $ReportType *.csv"
+    Filter      = "*-$ReportType-*.csv"
     ErrorAction = 'SilentlyContinue'
   }
   if ($Recurse) { $params.Recurse = $true }
