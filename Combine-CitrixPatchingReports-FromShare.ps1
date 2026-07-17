@@ -25,7 +25,8 @@ $ErrorActionPreference = 'Stop'
     * <Computer>-OSInfo-<date>.csv
 
   When more than one dated file exists for a computer and report type, the
-  newest file is used.
+  newest file is used. Application rows are normalised to Installed Before,
+  Installed After, Latest and Status fields.
 #>
 
 # ---------------------- Master -> Citrix mapping ----------------------
@@ -186,8 +187,9 @@ function Convert-ToStandardAppRow {
   [pscustomobject]@{
     Computer   = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Computer','ComputerName','Server','ServerName','Machine') -DefaultValue $FallbackComputer
     Application = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Application','Name','DisplayName','App') -DefaultValue 'Unknown application'
-    Installed  = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Installed','InstalledVersion','CurrentVersion','Version') -DefaultValue '-'
-    Latest     = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Latest','LatestVersion','AvailableVersion','TargetVersion') -DefaultValue '-'
+    InstalledBefore = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('InstalledBefore','Installed Before','Before','BeforeVersion','PreviousVersion','OriginalVersion') -DefaultValue '-'
+    InstalledAfter  = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('InstalledAfter','Installed After','After','AfterVersion','Installed','InstalledVersion','CurrentVersion','Version') -DefaultValue '-'
+    Latest          = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Latest','LatestVersion','AvailableVersion','TargetVersion') -DefaultValue '-'
     Status     = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Status','Result','State') -DefaultValue 'Unknown'
     Css        = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Css','CSS','RowCss') -DefaultValue ''
     LatestCss  = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('LatestCss','LatestCSS') -DefaultValue ''
@@ -352,7 +354,7 @@ ul { margin: 6px 0 12px 18px; }
         $latestCls = 'info'
       }
 
-      "<tr><td class='$rowCls'>$($a.Application)</td><td class='$rowCls'>$($a.Installed)</td><td class='$latestCls'>$($a.Latest)</td><td class='$rowCls'>$($a.Status)</td></tr>"
+      "<tr><td class='$rowCls'>$($a.Application)</td><td class='$rowCls'>$($a.InstalledBefore)</td><td class='$rowCls'>$($a.InstalledAfter)</td><td class='$latestCls'>$($a.Latest)</td><td class='$rowCls'>$($a.Status)</td></tr>"
     }
 
 @"
@@ -370,7 +372,7 @@ ul { margin: 6px 0 12px 18px; }
 
   <h3>Applications</h3>
   <table>
-    <thead><tr><th>Application</th><th>Installed</th><th>Latest</th><th>Status</th></tr></thead>
+    <thead><tr><th>Application</th><th>Installed Before</th><th>Installed After</th><th>Latest</th><th>Status</th></tr></thead>
     <tbody>
       $(($appRows -join "`n"))
     </tbody>
