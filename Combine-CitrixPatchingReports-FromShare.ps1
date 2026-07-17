@@ -27,7 +27,7 @@ $ErrorActionPreference = 'Stop'
   When more than one dated file exists for a computer and report type, the
   newest file is used. Application rows are normalised to Installed Before,
   Installed After and Status fields. Application comparison uses the complete
-  application name, so similarly named products remain separate. Approved application exceptions, such as Azure Data Studio, are treated as compliant.
+  application name, so similarly named products remain separate. Approved application exceptions, such as Azure Data Studio and Zoom Outlook Plugin, are treated as compliant. Adobe Acrobat Reader is excluded while Adobe Acrobat remains included.
 #>
 
 # ---------------------- Master -> Citrix mapping ----------------------
@@ -71,6 +71,11 @@ $ApplicationExceptions = @{
   'azure data studio' = @{
     DisplayStatus = 'Pass'
     Reason        = 'No further updates are available for this application.'
+  }
+
+  'zoom outlook plugin' = @{
+    DisplayStatus = 'Current'
+    Reason        = 'This application is approved and is treated as current.'
   }
 }
 
@@ -428,7 +433,12 @@ ul { margin:6px 0 12px 18px; }
   $presentMasters = @($computers | Where-Object { $allMasters -contains $_ } | Sort-Object)
   $missingMasters = @($allMasters | Where-Object { $presentMasters -notcontains $_ } | Sort-Object)
 
-  $reportApps = @($AppData | Where-Object { $_.Status -ne 'Application not installed' })
+  $reportApps = @(
+    $AppData | Where-Object {
+      $_.Status -ne 'Application not installed' -and
+      (Get-ApplicationIdentityKey -Application ([string]$_.Application)) -ne 'adobe acrobat reader'
+    }
+  )
   $updatedCount = @($reportApps | Where-Object { -not (Test-AppNeedsAttention -App $_) -and [string]$_.InstalledBefore -ne [string]$_.InstalledAfter }).Count
   $currentCount = @($reportApps | Where-Object { -not (Test-AppNeedsAttention -App $_) -and [string]$_.InstalledBefore -eq [string]$_.InstalledAfter }).Count
   $attentionCount = @($reportApps | Where-Object { Test-AppNeedsAttention -App $_ }).Count
