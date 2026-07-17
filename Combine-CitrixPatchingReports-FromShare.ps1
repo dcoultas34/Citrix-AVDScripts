@@ -249,8 +249,28 @@ ul { margin: 6px 0 12px 18px; }
     } else { @("<tr><td colspan='3'><em>No updates prior to this month were found.</em></td></tr>") }
 
     $appRows = foreach ($a in $apps) {
-      $rowCls = $a.Css
-      $latestCls = if ($a.LatestCss) { $a.LatestCss } else { $rowCls }
+      # Css and LatestCss were present in the original collector output, but some
+      # existing CSV files do not contain those columns. Read them safely and,
+      # when absent, derive the formatting from Status instead.
+      $rowCls = ''
+      if ($a.PSObject.Properties['Css']) {
+        $rowCls = [string]$a.Css
+      }
+      elseif ([string]$a.Status -match 'Update available|Evergreen not available') {
+        $rowCls = 'bad'
+      }
+      elseif ([string]$a.Status -match 'Latest.*installed|Ahead of') {
+        $rowCls = 'ok'
+      }
+
+      $latestCls = $rowCls
+      if ($a.PSObject.Properties['LatestCss'] -and $a.LatestCss) {
+        $latestCls = [string]$a.LatestCss
+      }
+      elseif ([string]$a.Latest -match 'waiting on Evergreen release') {
+        $latestCls = 'info'
+      }
+
       "<tr><td class='$rowCls'>$($a.Application)</td><td class='$rowCls'>$($a.Installed)</td><td class='$latestCls'>$($a.Latest)</td><td class='$rowCls'>$($a.Status)</td></tr>"
     }
 
