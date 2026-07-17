@@ -1,10 +1,6 @@
-#This script runs on each master image server, this uploads to a central repo, this uploads various csv files of patches and OS updates applied. 
-#Run the script switch to then combine and create a full HTML Report of work completed to the central repository
-
- 
- [CmdletBinding()]
+[CmdletBinding()]
 param(
-  [string]$ShareRoot = "\\Transfer\transfer\CitrixApps\Citrix Reporting\Image updates",
+  [string]$ShareRoot = "\\stprodukstcitrix01.file.core.windows.net\profiles\Citrix Reporting\Image Updates",
   [string]$Period    = (Get-Date).ToString("MMMM yyyy"),
   [switch]$Combine,
   [switch]$NoCombine
@@ -13,54 +9,42 @@ param(
 # ---------------------- Master -> Citrix mapping ----------------------
 $MasterMap = @(
   @{ Master='UKST1MICTXMI3U'; Environment='Non prod' ; Citrix='Windows-10-MS-NonProd-Standard' }
-  @{ Master='UKST1MICTXMI1' ; Environment='Production'; Citrix='Windows-10-MS-Prod-Standard' }
-  @{ Master='UKST1MICTXMI3' ; Environment='Admin tools'; Citrix='Windows-10-Persistent-Prod-IPT' }
-  @{ Master='UKST1MICTXMI2' ; Environment='Admin tools'; Citrix='Windows-10-MS-Prod-Access' }
-  @{ Master='UKST1MICTXMI2D'; Environment='Dev'        ; Citrix='Windows-10-MS-DEVL' }
-  @{ Master='UKST1MICTXMI1D'; Environment='Dev'        ; Citrix='Windows-10-Persistent-DEVL' }
+  @{ Master='UKST1MICTXMI5' ; Environment='Production'; Citrix='Windows-10-MS-Prod-Standard' }
+  @{ Master='UKST1MICTXMI4C' ; Environment='Admin tools'; Citrix='Windows-10-MS-Prod-Access' }
+  @{ Master='UKST1MICTXMI1D'; Environment='Dev'        ; Citrix='Windows-10-MS-DEVL' }
   @{ Master='UKST1MICTXMI1U'; Environment='CTE'        ; Citrix='Windows-10-MS-Test' }
-  @{ Master='UKST1MICTXMI2U'; Environment='CTE'        ; Citrix='Windows-10-Persistent-CTE' }
 ) | ForEach-Object { [pscustomobject]$_ }  # coerce to PSCustomObject
 
 # ---------------------- Citrix Machine Catalogues -> Master mapping ----------------------
 $CatalogMap = @(
   # ---- Multi Session ----
-  @{ Name='Windows 10 Multi Session UK South 3E Azure DR Prod' ;  Master='UKST1MICTXMI2' ; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South AuditTrack Prod'  ;  Master='UKST1MICTXMI2' ; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South DEVQA Prod'       ;  Master='UKST1MICTXMI2' ; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South Ent Apps Prod'    ;  Master='UKST1MICTXMI2' ; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South HR Systems Prod'  ;  Master='UKST1MICTXMI2' ; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South iManage Prod'     ;  Master='UKST1MICTXMI2' ; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South Standard Prod'    ;  Master='UKST1MICTXMI1' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South 3E Azure DR Prod' ;  Master='UKST1MICTXMI4C' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South AuditTrack Prod'  ;  Master='UKST1MICTXMI4C' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South DEVQA Prod'       ;  Master='UKST1MICTXMI4C' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South Ent Apps Prod'    ;  Master='UKST1MICTXMI4C' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South HR Systems Prod'  ;  Master='UKST1MICTXMI4C' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South iManage Prod'     ;  Master='UKST1MICTXMI4C' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South Standard Prod'    ;  Master='UKST1MICTXMI5' ; Type='Multi Session' }
   @{ Name='Windows 10 Multi Session UK South CTE'              ;  Master='UKST1MICTXMI1U'; Type='Multi Session' }
   @{ Name='Windows 10 Multi Session UK South CTE - UAT'        ;  Master='UKST1MICTXMI1U'; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South 3E Azure DR UAT'  ;  Master='UKST1MICTXMI2' ; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South AuditTrack UAT'   ;  Master='UKST1MICTXMI2' ; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South DEVQA UAT'        ;  Master='UKST1MICTXMI2' ; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South Ent Apps UAT'     ;  Master='UKST1MICTXMI2' ; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South HR Systems UAT'   ;  Master='UKST1MICTXMI2' ; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South iManage UAT'      ;  Master='UKST1MICTXMI2' ; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South DEV'              ;  Master='UKST1MICTXMI2D'; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South DEV - UAT'        ;  Master='UKST1MICTXMI2D'; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South 3E Azure DR UAT'  ;  Master='UKST1MICTXMI4C' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South AuditTrack UAT'   ;  Master='UKST1MICTXMI4C' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South DEVQA UAT'        ;  Master='UKST1MICTXMI4C' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South Ent Apps UAT'     ;  Master='UKST1MICTXMI4C' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South HR Systems UAT'   ;  Master='UKST1MICTXMI4C' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South iManage UAT'      ;  Master='UKST1MICTXMI4C' ; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South DEV'              ;  Master='UKST1MICTXMI1D'; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South DEV - UAT'        ;  Master='UKST1MICTXMI1D'; Type='Multi Session' }
   @{ Name='Windows 10 Multi Session UK South Standard Non-Prod';  Master='UKST1MICTXMI3U'; Type='Multi Session' }
-  @{ Name='Windows 10 Multi Session UK South Standard Non-Prod IT UAT'; Master='UKST1MICTXMI1U'; Type='Multi Session' }
+  @{ Name='Windows 10 Multi Session UK South Standard Non-Prod IT UAT'; Master='UKST1MICTXMI3U'; Type='Multi Session' }
 
-  # ---- Persistent / Single-User ----
-  @{ Name='Windows 10 SU UK South Persistent CTE'                 ; Master='UKST1MICTXMI2U'; Type='Persistent' }
-  @{ Name='Windows 10 SU UK South Persistent CTE - UAT'           ; Master='UKST1MICTXMI2U'; Type='Persistent' }
-  @{ Name='Windows 10 SU UK South Persistent CTE 3rd Party Access'; Master='UKST1MICTXMI1D'; Type='Persistent' }
-  @{ Name='Windows 10 SU UK South Persistent DEV'                 ; Master='UKST1MICTXMI1D'; Type='Persistent' }
-  @{ Name='Windows 10 SU UK South Persistent DEV - UAT'           ; Master='UKST1MICTXMI1D'; Type='Persistent' }
-  @{ Name='Windows 10 SU UK South Persistent DEV 3rd Party Access'; Master='UKST1MICTXMI1D'; Type='Persistent' }
-  @{ Name='Windows 10 Single User UK South IPT UAT'               ; Master='UKST1MICTXMI3' ; Type='Persistent' }
-  @{ Name='Windows 10 UK South IPT Prod'                          ; Master='UKST1MICTXMI3' ; Type='Persistent' }
 ) | ForEach-Object { [pscustomobject]$_ }
 
 # ---------------------- Applications to check ----------------------
 $AppsToCheck = @(
   @{ Name="Adobe Acrobat";           IsAdobeFull=$true;  LocalMatch=$null; EvergreenName=$null; WingetId=$null; ExpectEvergreen=$false }
   @{ Name="Microsoft Office 365"; LocalMatch="__OFFICE_C2R__"; EvergreenName="Microsoft365Apps"; PreferredChannel="MonthlyEnterprise"; WingetId="Microsoft.Office"; ExpectEvergreen=$true }
-  @{ Name="Adobe Acrobat Reader";    LocalMatch="Adobe Acrobat Reader"; EvergreenName="AdobeAcrobatReaderDC"; WingetId="Adobe.Acrobat.Reader.64-bit"; ExpectEvergreen=$false }
+  #@{ Name="Adobe Acrobat Reader";    LocalMatch="Adobe Acrobat Reader"; EvergreenName="AdobeAcrobatReaderDC"; WingetId="Adobe.Acrobat.Reader.64-bit"; ExpectEvergreen=$false }
   @{ Name="Google Chrome";           LocalMatch="Google Chrome";        EvergreenName="GoogleChrome";         WingetId="Google.Chrome";               ExpectEvergreen=$false }
   @{ Name="Microsoft Edge";          LocalMatch="Microsoft Edge";       EvergreenName="MicrosoftEdge";        WingetId="Microsoft.Edge";              ExpectEvergreen=$false }
   @{ Name="Visual Studio Code";      LocalMatch="Microsoft Visual Studio Code"; EvergreenName="MicrosoftVisualStudioCode"; WingetId="Microsoft.VisualStudioCode"; ExpectEvergreen=$false }
@@ -615,4 +599,3 @@ if ($Combine) {
 
   Convert-HtmlToPdf -HtmlPath $combinedHtml -PdfPath $combinedPdf | Out-Null
 }
-
