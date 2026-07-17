@@ -178,6 +178,49 @@ function Get-FirstPropertyValue {
   return $DefaultValue
 }
 
+
+function Convert-ToPlainText {
+  param($Value)
+
+  if ($null -eq $Value) { return $null }
+  $text = [string]$Value
+
+  # Existing CSV data may contain HTML anchors (for example, rewritten
+  # Mimecast links). Keep only the visible text for the report.
+  $text = [regex]::Replace($text, '<[^>]+>', '')
+  $text = [System.Net.WebUtility]::HtmlDecode($text)
+  return $text.Trim()
+}
+
+function Convert-ToHtmlSafe {
+  param($Value)
+  if ($null -eq $Value) { return '' }
+  return [System.Net.WebUtility]::HtmlEncode([string]$Value)
+}
+
+function Test-AppNeedsAttention {
+  param($App)
+
+  $status = [string]$App.Status
+  if ($status -match '(?i)update available|failed|failure|error|unknown|not available|could not query|requires attention') {
+    return $true
+  }
+
+  if ([string]::IsNullOrWhiteSpace([string]$App.InstalledAfter) -or [string]$App.InstalledAfter -eq '-') {
+    return $true
+  }
+
+  return $false
+}
+
+function Get-AppDisplayStatus {
+  param($App)
+
+  if (Test-AppNeedsAttention -App $App) { return 'Requires attention' }
+  if ([string]$App.InstalledBefore -ne [string]$App.InstalledAfter) { return 'Updated' }
+  return 'Already current'
+}
+
 function Convert-ToStandardAppRow {
   param(
     [Parameter(Mandatory)] $Row,
@@ -186,10 +229,10 @@ function Convert-ToStandardAppRow {
 
   [pscustomobject]@{
     Computer   = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Computer','ComputerName','Server','ServerName','Machine') -DefaultValue $FallbackComputer
-    Application = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Application','Name','DisplayName','App') -DefaultValue 'Unknown application'
-    InstalledBefore = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('InstalledBefore','Installed Before','Before','BeforeVersion','PreviousVersion','OriginalVersion') -DefaultValue '-'
-    InstalledAfter  = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('InstalledAfter','Installed After','After','AfterVersion','Installed','InstalledVersion','CurrentVersion','Version') -DefaultValue '-'
-    Status     = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Status','Result','State') -DefaultValue 'Unknown'
+    Application = Convert-ToPlainText (Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Application','Name','DisplayName','App') -DefaultValue 'Unknown application')
+    InstalledBefore = Convert-ToPlainText (Get-FirstPropertyValue -InputObject $Row -PropertyNames @('InstalledBefore','Installed Before','Before','BeforeVersion','PreviousVersion','OriginalVersion') -DefaultValue '-')
+    InstalledAfter  = Convert-ToPlainText (Get-FirstPropertyValue -InputObject $Row -PropertyNames @('InstalledAfter','Installed After','After','AfterVersion','Installed','InstalledVersion','CurrentVersion','Version') -DefaultValue '-')
+    Status     = Convert-ToPlainText (Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Status','Result','State') -DefaultValue 'Unknown')
     Css        = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Css','CSS','RowCss') -DefaultValue ''
   }
 }
@@ -227,7 +270,7 @@ function New-CombinedHtml {
   param(
     [array]$AppData,
     [array]$OsData,
-    [hashtable]$OsInfoMap,      # NEW: machine -> OS info
+    [hashtable]$OsInfoMap,
     [string]$Title,
     [string]$OutPath,
     [array]$Map,
@@ -237,168 +280,225 @@ function New-CombinedHtml {
 
   $css = @"
 <style>
-body { font-family: Segoe UI, Arial, sans-serif; margin: 24px; }
+body { font-family: Segoe UI, Arial, sans-serif; margin: 24px; color:#111827; }
 h1 { margin: 0 0 16px 0; }
-h3 { margin: 6px 0 12px 0; color:#374151; }
-.panel { border:1px solid #e0e0e0; border-radius:10px; padding:16px; margin:18px 0; }
-.tag  { display:inline-block; background:#e5e7eb; color:#111827; padding:2px 10px; border-radius:999px; font-size:12px; margin-left:8px; }
-.small { color:#6b7280; font-size:12px; margin-top: 16px; }
-table { border-collapse: collapse; width: 100%; margin-bottom: 18px; }
-th,td { border: 1px solid #ddd; padding: 8px; text-align: left; background:#ffffff; }
-th { background: #f3f3f3; }
-.ok   { color:#2e7d32; font-weight:600; }
-.bad  { color:#c62828; font-weight:600; }
-.os-in-month { color:#2e7d32; font-weight:600; }
+h2 { margin: 8px 0 14px 0; font-size:20px; }
+h3 { margin: 14px 0 10px 0; color:#374151; }
+.panel { border:1px solid #dfe3e8; border-radius:10px; padding:16px; margin:18px 0; page-break-inside:avoid; }
+.tag { display:inline-block; background:#e5e7eb; color:#111827; padding:3px 10px; border-radius:999px; font-size:12px; margin:3px 0 3px 8px; }
+.small { color:#6b7280; font-size:12px; margin-top:16px; }
+table { border-collapse:collapse; width:100%; margin-bottom:18px; }
+th,td { border:1px solid #d7dce1; padding:8px; text-align:left; vertical-align:top; }
+th { background:#f3f4f6; }
 .headerline { font-size:18px; font-weight:700; }
-ul { margin: 6px 0 12px 18px; }
+ul { margin:6px 0 12px 18px; }
 .catlabel { font-weight:600; }
-.warn { color:#c62828; }
+.warn { color:#b91c1c; font-weight:600; }
+.good { color:#166534; font-weight:700; }
+.amber { color:#92400e; font-weight:700; }
+.bad { color:#b91c1c; font-weight:700; }
+.row-updated td { background:#ecfdf3; }
+.row-current td { background:#ffffff; }
+.row-attention td { background:#fef2f2; color:#991b1b; font-weight:600; }
+.os-in-month { color:#166534; font-weight:600; }
+.summary-grid { display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; }
+.summary-card { min-width:180px; border:1px solid #dfe3e8; border-radius:9px; padding:12px 14px; background:#fafafa; }
+.summary-number { font-size:26px; font-weight:750; line-height:1.1; }
+.summary-label { color:#4b5563; font-size:13px; margin-top:4px; }
+.status-pill { display:inline-block; border-radius:999px; padding:3px 9px; font-size:12px; font-weight:700; }
+.status-green { background:#dcfce7; color:#166534; }
+.status-amber { background:#fef3c7; color:#92400e; }
+.status-red { background:#fee2e2; color:#991b1b; }
+.note { color:#4b5563; font-size:12px; }
 </style>
 "@
 
-  $repMonth    = [datetime]::ParseExact($Period,'MMMM yyyy',$null)
-  $monthStart  = Get-Date -Year $repMonth.Year -Month $repMonth.Month -Day 1 -Hour 0 -Minute 0 -Second 0
-  $monthEnd    = $monthStart.AddMonths(1)
+  $repMonth   = [datetime]::ParseExact($Period,'MMMM yyyy',[System.Globalization.CultureInfo]::InvariantCulture)
+  $monthStart = Get-Date -Year $repMonth.Year -Month $repMonth.Month -Day 1 -Hour 0 -Minute 0 -Second 0
+  $monthEnd   = $monthStart.AddMonths(1)
 
   $computers = @($AppData.Computer + $OsData.Computer | Where-Object { $_ } | Select-Object -Unique | Sort-Object)
-
   $allMasters = @($Map | Select-Object -ExpandProperty Master -Unique | Sort-Object)
   $presentMasters = @($computers | Where-Object { $allMasters -contains $_ } | Sort-Object)
   $missingMasters = @($allMasters | Where-Object { $presentMasters -notcontains $_ } | Sort-Object)
-  $countLine = "Master image count: {0} of {1}" -f ($presentMasters.Count), ($allMasters.Count)
-  $missingLine = if ($missingMasters.Count -gt 0) { "Please run the report script on: " + ($missingMasters -join ', ') } else { "" }
+
+  $reportApps = @($AppData | Where-Object { $_.Status -ne 'Application not installed' })
+  $updatedCount = @($reportApps | Where-Object { -not (Test-AppNeedsAttention -App $_) -and [string]$_.InstalledBefore -ne [string]$_.InstalledAfter }).Count
+  $currentCount = @($reportApps | Where-Object { -not (Test-AppNeedsAttention -App $_) -and [string]$_.InstalledBefore -eq [string]$_.InstalledAfter }).Count
+  $attentionCount = @($reportApps | Where-Object { Test-AppNeedsAttention -App $_ }).Count
+  $monthlyOsCount = @($OsData | Where-Object { $_.InstalledOn -ge $monthStart -and $_.InstalledOn -lt $monthEnd }).Count
+
+  $countLine = "Master image count: {0} of {1}" -f $presentMasters.Count, $allMasters.Count
+  $missingLine = if ($missingMasters.Count -gt 0) { "Missing reports for: " + ($missingMasters -join ', ') } else { '' }
+
+  $matrixRows = foreach ($comp in $computers) {
+    $machineApps = @($reportApps | Where-Object Computer -eq $comp)
+    $machineOsMonth = @($OsData | Where-Object { $_.Computer -eq $comp -and $_.InstalledOn -ge $monthStart -and $_.InstalledOn -lt $monthEnd })
+    $needsAttention = @($machineApps | Where-Object { Test-AppNeedsAttention -App $_ }).Count -gt 0
+
+    $appClass = if ($needsAttention) { 'status-red' } else { 'status-green' }
+    $appText  = if ($needsAttention) { 'Attention' } else { 'Pass' }
+    $osClass  = if ($machineOsMonth.Count -gt 0) { 'status-green' } else { 'status-amber' }
+    $osText   = if ($machineOsMonth.Count -gt 0) { 'Pass' } else { 'No monthly updates' }
+    $overallClass = if ($needsAttention) { 'status-red' } elseif ($machineOsMonth.Count -eq 0) { 'status-amber' } else { 'status-green' }
+    $overallText  = if ($needsAttention) { 'Attention' } elseif ($machineOsMonth.Count -eq 0) { 'Review' } else { 'Pass' }
+
+    "<tr><td>$(Convert-ToHtmlSafe $comp)</td><td><span class='status-pill $appClass'>$appText</span></td><td><span class='status-pill $osClass'>$osText</span></td><td><span class='status-pill $overallClass'>$overallText</span></td></tr>"
+  }
+
+  $consistencyRows = foreach ($group in ($reportApps | Group-Object Application | Sort-Object Name)) {
+    $rows = @($group.Group)
+    $present = @($rows.Computer | Select-Object -Unique | Sort-Object)
+    $missing = @($computers | Where-Object { $present -notcontains $_ })
+    $versions = @($rows.InstalledAfter | Where-Object { $_ -and $_ -ne '-' } | Select-Object -Unique | Sort-Object)
+    $attentionMachines = @($rows | Where-Object { Test-AppNeedsAttention -App $_ } | Select-Object -ExpandProperty Computer -Unique | Sort-Object)
+
+    $notes = @()
+    if ($versions.Count -gt 1) { $notes += 'Different post-patching versions across images' }
+    if ($missing.Count -gt 0) { $notes += ('Not present on: ' + ($missing -join ', ')) }
+    if ($attentionMachines.Count -gt 0) { $notes += ('Requires attention on: ' + ($attentionMachines -join ', ')) }
+    if ($notes.Count -eq 0) { $notes += 'Consistent' }
+
+    $noteClass = if ($attentionMachines.Count -gt 0) { 'bad' } elseif ($versions.Count -gt 1) { 'amber' } else { 'good' }
+    "<tr><td>$(Convert-ToHtmlSafe $group.Name)</td><td>$($present.Count) of $($computers.Count)</td><td>$(Convert-ToHtmlSafe ($versions -join ', '))</td><td class='$noteClass'>$(Convert-ToHtmlSafe ($notes -join '; '))</td></tr>"
+  }
 
   $headerBlock = @"
 <div class='panel'>
   <div class='headerline'>$countLine</div>
-  $(if($missingLine){ "<div class='warn'>$missingLine</div>" } else { "" })
+  $(if($missingLine){ "<div class='warn'>$missingLine</div>" } else { '' })
+  <div class='summary-grid'>
+    <div class='summary-card'><div class='summary-number'>$updatedCount</div><div class='summary-label'>Applications updated</div></div>
+    <div class='summary-card'><div class='summary-number'>$currentCount</div><div class='summary-label'>Already current</div></div>
+    <div class='summary-card'><div class='summary-number'>$attentionCount</div><div class='summary-label'>Require attention</div></div>
+    <div class='summary-card'><div class='summary-number'>$monthlyOsCount</div><div class='summary-label'>OS updates recorded this month</div></div>
+  </div>
+</div>
+
+<div class='panel'>
+  <h2>Compliance overview</h2>
+  <table>
+    <thead><tr><th>Master image</th><th>Applications</th><th>OS updates</th><th>Overall</th></tr></thead>
+    <tbody>$(($matrixRows -join "`n"))</tbody>
+  </table>
+</div>
+
+<div class='panel'>
+  <h2>Application consistency review</h2>
+  <p class='note'>Application presence can legitimately differ by image role. This table highlights differences for review rather than automatically treating every difference as a fault.</p>
+  <table>
+    <thead><tr><th>Application</th><th>Present on images</th><th>Installed After version(s)</th><th>Review note</th></tr></thead>
+    <tbody>$(($consistencyRows -join "`n"))</tbody>
+  </table>
 </div>
 "@
 
   $sections = foreach ($comp in $computers) {
-    $apps = $AppData | Where-Object { $_.Computer -eq $comp -and $_.Status -ne 'Application not installed' } | Sort-Object Application
+    $apps = @($reportApps | Where-Object Computer -eq $comp | Sort-Object Application)
+    $osMonth = @($OsData | Where-Object { $_.Computer -eq $comp -and $_.InstalledOn -ge $monthStart -and $_.InstalledOn -lt $monthEnd } | Sort-Object InstalledOn -Descending)
+    $osPrev3 = @($OsData | Where-Object { $_.Computer -eq $comp -and $_.InstalledOn -lt $monthStart } | Sort-Object InstalledOn -Descending | Select-Object -First 3)
 
-    $osMonth = @($OsData | Where-Object {
-      $_.Computer -eq $comp -and $_.InstalledOn -ge $monthStart -and $_.InstalledOn -lt $monthEnd
-    } | Sort-Object InstalledOn -Descending)
+    $mapRows = @($Map | Where-Object { $_.Master -ieq $comp })
+    $envs = ($mapRows.Environment | ForEach-Object { "$($_)".Trim() } | Select-Object -Unique) -join ', '
+    $ctxs = ($mapRows.Citrix | ForEach-Object { "$($_)".Trim() } | Select-Object -Unique) -join ', '
+    if (-not $envs) { $envs = '-' }
+    if (-not $ctxs) { $ctxs = '-' }
 
-    $osPrev3 = @($OsData | Where-Object {
-      $_.Computer -eq $comp -and $_.InstalledOn -lt $monthStart
-    } | Sort-Object InstalledOn -Descending | Select-Object -First 3)
-
-    $rows = $Map | Where-Object { $_.Master -ieq $comp }
-    $envs = ($rows.Environment | ForEach-Object { "$_".Trim() } | Select-Object -Unique) -join ', '
-    $ctxs = ($rows.Citrix      | ForEach-Object { "$_".Trim() } | Select-Object -Unique) -join ', '
-    if (-not $envs) { $envs = "-" }
-    if (-not $ctxs) { $ctxs = "-" }
-
-    # NEW: OS tag
     $osTag = ''
     if ($OsInfoMap.ContainsKey($comp)) {
       $oi = $OsInfoMap[$comp]
       $osTag = "OS: $($oi.OSName) $($oi.OSVersion) (Build $($oi.OSBuild))"
     }
 
-    $cats = foreach ($c in ($CatalogMap | Where-Object { $_.Master -ieq $comp })) {
-      $t = ($c.Type -as [string]).Trim()
-      if     ($t -match '^(multi\s*session)$')                { $t = 'Multi Session' }
-      elseif ($t -match '^(persistent|persistant|single.*)$') { $t = 'Persistent' }
-      [pscustomobject]@{ Name=($c.Name -as [string]).Trim(); Type=$t }
-    }
-    $catTotal = ($cats | Measure-Object).Count
-    $ms = $cats | Where-Object Type -eq 'Multi Session' | Select-Object -ExpandProperty Name
-    $ps = $cats | Where-Object Type -eq 'Persistent'    | Select-Object -ExpandProperty Name
+    $cats = @(
+      foreach ($c in ($CatalogMap | Where-Object { $_.Master -ieq $comp })) {
+        $type = ([string]$c.Type).Trim()
+        if ($type -match '^(multi\s*session)$') { $type = 'Multi Session' }
+        elseif ($type -match '^(persistent|persistant|single.*)$') { $type = 'Persistent' }
+        [pscustomobject]@{ Name=([string]$c.Name).Trim(); Type=$type }
+      }
+    )
+    $catTotal = $cats.Count
+    $ms = @($cats | Where-Object Type -eq 'Multi Session' | Select-Object -ExpandProperty Name)
+    $ps = @($cats | Where-Object Type -eq 'Persistent' | Select-Object -ExpandProperty Name)
     $catHtml = @()
-    if ($ms) { $catHtml += "<div class='catlabel'>Multi Session</div><ul>$(( $ms | ForEach-Object { "<li>$_</li>" } ) -join '')</ul>" }
-    if ($ps) { $catHtml += "<div class='catlabel'>Persistent</div><ul>$(( $ps | ForEach-Object { "<li>$_</li>" } ) -join '')</ul>" }
-    if (-not $catHtml) { $catHtml = @('<em>No catalogues mapped.</em>') }
+    if ($ms.Count -gt 0) { $catHtml += "<div class='catlabel'>Multi Session</div><ul>$(( $ms | ForEach-Object { '<li>' + (Convert-ToHtmlSafe $_) + '</li>' } ) -join '')</ul>" }
+    if ($ps.Count -gt 0) { $catHtml += "<div class='catlabel'>Persistent</div><ul>$(( $ps | ForEach-Object { '<li>' + (Convert-ToHtmlSafe $_) + '</li>' } ) -join '')</ul>" }
+    if ($catHtml.Count -eq 0) { $catHtml = @('<em>No catalogues mapped.</em>') }
+
+    $appRows = foreach ($a in $apps) {
+      $attention = Test-AppNeedsAttention -App $a
+      $changed = [string]$a.InstalledBefore -ne [string]$a.InstalledAfter
+      $rowClass = if ($attention) { 'row-attention' } elseif ($changed) { 'row-updated' } else { 'row-current' }
+      $displayStatus = Get-AppDisplayStatus -App $a
+      $statusClass = if ($attention) { 'status-red' } elseif ($changed) { 'status-green' } else { 'status-green' }
+
+      "<tr class='$rowClass'><td>$(Convert-ToHtmlSafe $a.Application)</td><td>$(Convert-ToHtmlSafe $a.InstalledBefore)</td><td>$(Convert-ToHtmlSafe $a.InstalledAfter)</td><td><span class='status-pill $statusClass'>$displayStatus</span></td></tr>"
+    }
 
     $fmt = 'dd/MM/yyyy'
-    $osRowsMonth = if ($osMonth -and $osMonth.Count -gt 0) {
+    $osRowsMonth = if ($osMonth.Count -gt 0) {
       foreach ($o in $osMonth) {
-        $d = if ($o.InstalledOn) { $o.InstalledOn.ToString($fmt) } else { '-' }
-        "<tr><td class='os-in-month'>$($o.KB)</td><td class='os-in-month'>$($o.Description)</td><td class='os-in-month'>$d</td></tr>"
+        $date = if ($o.InstalledOn) { $o.InstalledOn.ToString($fmt) } else { '-' }
+        "<tr><td class='os-in-month'>$(Convert-ToHtmlSafe $o.KB)</td><td class='os-in-month'>$(Convert-ToHtmlSafe $o.Description)</td><td class='os-in-month'>$date</td></tr>"
       }
-    } else { @("<tr><td colspan='3'><em>No OS updates were installed in $Period.</em></td></tr>") }
+    } else { @("<tr><td colspan='3'><em>No OS updates were installed in $(Convert-ToHtmlSafe $Period).</em></td></tr>") }
 
-    $osRowsPrev3 = if ($osPrev3 -and $osPrev3.Count -gt 0) {
+    $osRowsPrev3 = if ($osPrev3.Count -gt 0) {
       foreach ($o in $osPrev3) {
-        $d = if ($o.InstalledOn) { $o.InstalledOn.ToString($fmt) } else { '-' }
-        "<tr><td>$($o.KB)</td><td>$($o.Description)</td><td>$d</td></tr>"
+        $date = if ($o.InstalledOn) { $o.InstalledOn.ToString($fmt) } else { '-' }
+        "<tr><td>$(Convert-ToHtmlSafe $o.KB)</td><td>$(Convert-ToHtmlSafe $o.Description)</td><td>$date</td></tr>"
       }
     } else { @("<tr><td colspan='3'><em>No updates prior to this month were found.</em></td></tr>") }
 
-    $appRows = foreach ($a in $apps) {
-      # Css was present in the original collector output, but some existing
-      # CSV files do not contain that column. When absent, derive formatting
-      # from the Status value instead.
-      $rowCls = ''
-      if ($a.PSObject.Properties['Css']) {
-        $rowCls = [string]$a.Css
-      }
-      elseif ([string]$a.Status -match 'Update available|Evergreen not available|Failed|Error') {
-        $rowCls = 'bad'
-      }
-      elseif ([string]$a.Status -match 'Latest.*installed|Ahead of|Success|Updated|No change') {
-        $rowCls = 'ok'
-      }
-
-      "<tr><td class='$rowCls'>$($a.Application)</td><td class='$rowCls'>$($a.InstalledBefore)</td><td class='$rowCls'>$($a.InstalledAfter)</td><td class='$rowCls'>$($a.Status)</td></tr>"
-    }
-
 @"
 <div class='panel'>
-  <div class='headerline'>$comp
-    <span class='tag'>Env: $envs</span>
-    <span class='tag'>Citrix: $ctxs</span>
+  <div class='headerline'>$(Convert-ToHtmlSafe $comp)
+    <span class='tag'>Env: $(Convert-ToHtmlSafe $envs)</span>
+    <span class='tag'>Citrix: $(Convert-ToHtmlSafe $ctxs)</span>
     <span class='tag'>Catalogues: $catTotal</span>
-    $(if($osTag){ "<span class='tag'>$osTag</span>" } )
+    $(if($osTag){ "<span class='tag'>$(Convert-ToHtmlSafe $osTag)</span>" } else { '' })
   </div>
 
-  <div><span class='catlabel'>Citrix Machine catalogues:</span><br/>
-    $(($catHtml -join ""))  
-  </div>
+  <div><span class='catlabel'>Citrix Machine catalogues:</span><br/>$(($catHtml -join ''))</div>
 
   <h3>Applications</h3>
   <table>
     <thead><tr><th>Application</th><th>Installed Before</th><th>Installed After</th><th>Status</th></tr></thead>
-    <tbody>
-      $(($appRows -join "`n"))
-    </tbody>
+    <tbody>$(($appRows -join "`n"))</tbody>
   </table>
 
-  <h3>OS updates applied in $Period</h3>
+  <h3>OS updates applied in $(Convert-ToHtmlSafe $Period)</h3>
   <table>
     <thead><tr><th>KB</th><th>Description</th><th>Installed On</th></tr></thead>
-    <tbody>
-      $(($osRowsMonth -join "`n"))
-    </tbody>
+    <tbody>$(($osRowsMonth -join "`n"))</tbody>
   </table>
 
   <h3>OS updates – recent 3 (excluding this month)</h3>
   <table>
     <thead><tr><th>KB</th><th>Description</th><th>Installed On</th></tr></thead>
-    <tbody>
-      $(($osRowsPrev3 -join "`n"))
-    </tbody>
+    <tbody>$(($osRowsPrev3 -join "`n"))</tbody>
   </table>
 </div>
 "@
   }
 
+  $generated = (Get-Date).ToString('dd/MM/yyyy HH:mm')
   $html = @"
 <html>
-<head><meta charset='utf-8'><title>$Title</title>$css</head>
+<head><meta charset='utf-8'><title>$(Convert-ToHtmlSafe $Title)</title>$css</head>
 <body>
-<h1>$Title</h1>
+<h1>$(Convert-ToHtmlSafe $Title)</h1>
 $headerBlock
 $(($sections -join "`n"))
-<p class='small'>Apps: the report shows the installed version before and after patching. Green indicates a successful/current result; red indicates an update, failure, or error requiring attention.</p>
-<p class='small'>OS: dates shown as DD/MM/YYYY. We show updates applied <strong>this month</strong> (green) and the <strong>previous 3 updates</strong> excluding this month.</p>
-<p class='small'>Generated: $(Get-Date)</p>
+<p class='small'>Application rows: light green = updated, white = already current, light red = requires attention. The Status column is derived from the before/after result and the source status.</p>
+<p class='small'>The consistency review flags version and application-presence differences. Different application sets may be intentional for specialised images.</p>
+<p class='small'>OS dates use DD/MM/YYYY. The report shows updates applied during the selected month and the previous three updates.</p>
+<p class='small'>Generated: $generated</p>
 </body>
 </html>
 "@
+
   $html | Set-Content -Path $OutPath -Encoding UTF8
   return $OutPath
 }
