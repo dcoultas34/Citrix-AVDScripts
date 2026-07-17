@@ -346,21 +346,31 @@ ul { margin:6px 0 12px 18px; }
     "<tr><td>$(Convert-ToHtmlSafe $comp)</td><td><span class='status-pill $appClass'>$appText</span></td><td><span class='status-pill $osClass'>$osText</span></td><td><span class='status-pill $overallClass'>$overallText</span></td></tr>"
   }
 
+  # Only flag genuine inconsistencies. An application being absent from an
+  # image is intentionally ignored because each image can have a different role.
   $consistencyRows = foreach ($group in ($reportApps | Group-Object Application | Sort-Object Name)) {
     $rows = @($group.Group)
-    $present = @($rows.Computer | Select-Object -Unique | Sort-Object)
-    $missing = @($computers | Where-Object { $present -notcontains $_ })
     $versions = @($rows.InstalledAfter | Where-Object { $_ -and $_ -ne '-' } | Select-Object -Unique | Sort-Object)
     $attentionMachines = @($rows | Where-Object { Test-AppNeedsAttention -App $_ } | Select-Object -ExpandProperty Computer -Unique | Sort-Object)
 
     $notes = @()
     if ($versions.Count -gt 1) { $notes += 'Different post-patching versions across images' }
-    if ($missing.Count -gt 0) { $notes += ('Not present on: ' + ($missing -join ', ')) }
     if ($attentionMachines.Count -gt 0) { $notes += ('Requires attention on: ' + ($attentionMachines -join ', ')) }
-    if ($notes.Count -eq 0) { $notes += 'Consistent' }
 
-    $noteClass = if ($attentionMachines.Count -gt 0) { 'bad' } elseif ($versions.Count -gt 1) { 'amber' } else { 'good' }
-    "<tr><td>$(Convert-ToHtmlSafe $group.Name)</td><td>$($present.Count) of $($computers.Count)</td><td>$(Convert-ToHtmlSafe ($versions -join ', '))</td><td class='$noteClass'>$(Convert-ToHtmlSafe ($notes -join '; '))</td></tr>"
+    # Do not add a row when the application is consistent. This keeps the
+    # review section focused only on items that genuinely need investigation.
+    if ($notes.Count -gt 0) {
+      $noteClass = if ($attentionMachines.Count -gt 0) { 'bad' } else { 'amber' }
+      "<tr><td>$(Convert-ToHtmlSafe $group.Name)</td><td>$(Convert-ToHtmlSafe ($versions -join ', '))</td><td class='$noteClass'>$(Convert-ToHtmlSafe ($notes -join '; '))</td></tr>"
+    }
+  }
+  $consistencyRows = @($consistencyRows | Where-Object { $_ })
+
+  $consistencyBody = if ($consistencyRows.Count -gt 0) {
+    ($consistencyRows -join "`n")
+  }
+  else {
+    "<tr><td colspan='3' class='good'>No application inconsistencies detected.</td></tr>"
   }
 
   $headerBlock = @"
@@ -384,11 +394,11 @@ ul { margin:6px 0 12px 18px; }
 </div>
 
 <div class='panel'>
-  <h2>Application consistency review</h2>
-  <p class='note'>Application presence can legitimately differ by image role. This table highlights differences for review rather than automatically treating every difference as a fault.</p>
+  <h2>Items requiring attention</h2>
+  <p class='note'>Applications that are intentionally absent from an image are not included. Only version differences and application results requiring investigation are shown.</p>
   <table>
-    <thead><tr><th>Application</th><th>Present on images</th><th>Installed After version(s)</th><th>Review note</th></tr></thead>
-    <tbody>$(($consistencyRows -join "`n"))</tbody>
+    <thead><tr><th>Application</th><th>Installed After version(s)</th><th>Review note</th></tr></thead>
+    <tbody>$consistencyBody</tbody>
   </table>
 </div>
 "@
@@ -492,7 +502,7 @@ ul { margin:6px 0 12px 18px; }
 $headerBlock
 $(($sections -join "`n"))
 <p class='small'>Application rows: light green = updated, white = already current, light red = requires attention. The Status column is derived from the before/after result and the source status.</p>
-<p class='small'>The consistency review flags version and application-presence differences. Different application sets may be intentional for specialised images.</p>
+<p class='small'>The attention review ignores applications that are intentionally absent from particular images. It only flags differing post-patch versions and results that require investigation.</p>
 <p class='small'>OS dates use DD/MM/YYYY. The report shows updates applied during the selected month and the previous three updates.</p>
 <p class='small'>Generated: $generated</p>
 </body>
