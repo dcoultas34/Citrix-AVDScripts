@@ -141,6 +141,69 @@ function Convert-ToDate {
   catch { return $null }
 }
 
+
+function Get-FirstPropertyValue {
+  param(
+    [Parameter(Mandatory)] $InputObject,
+    [Parameter(Mandatory)] [string[]]$PropertyNames,
+    $DefaultValue = $null
+  )
+
+  foreach ($name in $PropertyNames) {
+    $property = $InputObject.PSObject.Properties[$name]
+    if ($property -and $null -ne $property.Value -and -not [string]::IsNullOrWhiteSpace("$($property.Value)")) {
+      return $property.Value
+    }
+  }
+
+  return $DefaultValue
+}
+
+function Convert-ToStandardAppRow {
+  param(
+    [Parameter(Mandatory)] $Row,
+    [Parameter(Mandatory)] [string]$FallbackComputer
+  )
+
+  [pscustomobject]@{
+    Computer   = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Computer','ComputerName','Server','ServerName','Machine') -DefaultValue $FallbackComputer
+    Application = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Application','Name','DisplayName','App') -DefaultValue 'Unknown application'
+    Installed  = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Installed','InstalledVersion','CurrentVersion','Version') -DefaultValue '-'
+    Latest     = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Latest','LatestVersion','AvailableVersion','TargetVersion') -DefaultValue '-'
+    Status     = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Status','Result','State') -DefaultValue 'Unknown'
+    Css        = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Css','CSS','RowCss') -DefaultValue ''
+    LatestCss  = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('LatestCss','LatestCSS') -DefaultValue ''
+  }
+}
+
+function Convert-ToStandardOsRow {
+  param(
+    [Parameter(Mandatory)] $Row,
+    [Parameter(Mandatory)] [string]$FallbackComputer
+  )
+
+  [pscustomobject]@{
+    Computer    = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Computer','ComputerName','Server','ServerName','Machine') -DefaultValue $FallbackComputer
+    KB          = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('KB','HotFixID','KBNumber') -DefaultValue '-'
+    Description = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Description','UpdateDescription','Title') -DefaultValue '-'
+    InstalledOn = Convert-ToDate (Get-FirstPropertyValue -InputObject $Row -PropertyNames @('InstalledOn','InstalledDate','DateInstalled') -DefaultValue $null)
+  }
+}
+
+function Convert-ToStandardOsInfoRow {
+  param(
+    [Parameter(Mandatory)] $Row,
+    [Parameter(Mandatory)] [string]$FallbackComputer
+  )
+
+  [pscustomobject]@{
+    Computer  = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('Computer','ComputerName','Server','ServerName','Machine') -DefaultValue $FallbackComputer
+    OSName    = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('OSName','Caption','OperatingSystem') -DefaultValue '-'
+    OSVersion = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('OSVersion','Version') -DefaultValue '-'
+    OSBuild   = Get-FirstPropertyValue -InputObject $Row -PropertyNames @('OSBuild','Build','BuildNumber') -DefaultValue '-'
+  }
+}
+
 # ---------------------- Combined HTML ----------------------
 function New-CombinedHtml {
   param(
@@ -376,7 +439,11 @@ try {
   }
 
   $allApps = foreach ($record in $appFileRecords) {
-    Import-CsvRobust -Path $record.File.FullName
+    foreach ($row in @(Import-CsvRobust -Path $record.File.FullName)) {
+      if ($row) {
+        Convert-ToStandardAppRow -Row $row -FallbackComputer $record.Computer
+      }
+    }
   }
   $allApps = @($allApps | Where-Object { $_ })
   if ($allApps.Count -eq 0) {
@@ -384,20 +451,20 @@ try {
   }
 
   $allOs = foreach ($record in @(Get-LatestReportFiles -Folder $reportFolder -ReportType OSUpdates -Recurse:$Recurse)) {
-    Import-CsvRobust -Path $record.File.FullName
-  }
-  $allOs = @($allOs | Where-Object { $_ } | ForEach-Object {
-    if ($_.PSObject.Properties['InstalledOn']) {
-      $_.InstalledOn = Convert-ToDate $_.InstalledOn
+    foreach ($row in @(Import-CsvRobust -Path $record.File.FullName)) {
+      if ($row) {
+        Convert-ToStandardOsRow -Row $row -FallbackComputer $record.Computer
+      }
     }
-    $_
-  })
+  }
+  $allOs = @($allOs | Where-Object { $_ })
 
   $osInfoMap = @{}
   foreach ($record in @(Get-LatestReportFiles -Folder $reportFolder -ReportType OSInfo -Recurse:$Recurse)) {
     foreach ($row in @(Import-CsvRobust -Path $record.File.FullName)) {
-      if ($row -and $row.Computer) {
-        $osInfoMap[$row.Computer] = $row
+      if ($row) {
+        $standardRow = Convert-ToStandardOsInfoRow -Row $row -FallbackComputer $record.Computer
+        $osInfoMap[$standardRow.Computer] = $standardRow
       }
     }
   }
