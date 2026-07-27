@@ -1,21 +1,21 @@
 <#
 .SYNOPSIS
-    Checks a Citrix master image for applications that may require removal.
+    Checks nominated Citrix master images for legacy applications.
 
 .DESCRIPTION
     Run this script locally on each master image.
 
-    It will:
-      1. Check installed-program registry entries.
-      2. Check installed and provisioned Windows Appx packages.
-      3. Check applicable Windows optional features.
-      4. Upload a CSV for the current machine.
-      5. Rebuild a combined HTML report covering all expected machines.
+    The script:
+      1. Checks traditional installed applications.
+      2. Checks installed and provisioned Windows Appx packages.
+      3. Checks applicable Windows optional features.
+      4. Uploads a CSV report for the current machine.
+      5. Rebuilds a combined HTML report covering all expected machines.
 
 .NOTES
     Run from an elevated PowerShell window.
 
-    The account running the script needs Modify permissions to:
+    The account running the script requires Modify permissions to:
 
     \\Transfer\Transfer\CitrixApps\Citrix reporting\Appremoval
 #>
@@ -45,184 +45,249 @@ $ExpectedDevices = @(
 # Software to check
 #
 # RegistryPatterns:
-#   Used against traditional Add/Remove Programs registry entries.
+#   Matches traditional Add/Remove Programs entries.
+#
+# ExcludePatterns:
+#   Excludes supporting components that might otherwise match.
 #
 # AppxPatterns:
-#   Used against installed and provisioned Microsoft Store packages.
+#   Matches installed or provisioned Windows Apps.
 #
 # FeaturePatterns:
-#   Used against Windows optional features.
+#   Matches enabled Windows optional features.
 # -------------------------------------------------------------------------
 
 $SoftwareChecks = @(
+
     [PSCustomObject]@{
         Name             = "Microsoft Visual C++ 2005 Redistributable"
         RegistryPatterns = @("*Microsoft Visual C++ 2005*Redistributable*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft Visual C++ 2010 Redistributable"
         RegistryPatterns = @("*Microsoft Visual C++ 2010*Redistributable*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft SQL Server 2012 Native Client"
         RegistryPatterns = @("*SQL Server 2012 Native Client*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft Visual C++ 2013 Redistributable"
         RegistryPatterns = @("*Microsoft Visual C++ 2013*Redistributable*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft SQL Server System CLR Types 2014"
         RegistryPatterns = @(
             "*SQL Server*System CLR Types*2014*"
             "*System CLR Types for SQL Server 2014*"
         )
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft Visual Studio 2015 Tools for Applications"
         RegistryPatterns = @("*Visual Studio 2015 Tools for Applications*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft Visual Studio 2015 Shell (Isolated)"
         RegistryPatterns = @("*Visual Studio 2015 Shell*Isolated*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft SQL Server 2016 Integration Services"
         RegistryPatterns = @("*SQL Server 2016 Integration Services*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft SQL Server System CLR Types 2016"
         RegistryPatterns = @(
             "*SQL Server*System CLR Types*2016*"
             "*System CLR Types for SQL Server 2016*"
         )
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft OData Source 13 for Microsoft SQL Server 2016"
         RegistryPatterns = @(
             "*OData Source*SQL Server 2016*"
             "*Microsoft OData Source 13*"
         )
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
+    # This checks only the main SQL Server Management Studio installation.
+    # Supporting SQL Server components are explicitly excluded.
     [PSCustomObject]@{
         Name             = "Microsoft SQL Server 2016 Management Studio"
         RegistryPatterns = @(
-            "*SQL Server 2016 Management Studio*"
-            "*SQL Server Management Studio*"
+            "Microsoft SQL Server 2016 Management Studio"
+            "Microsoft SQL Server Management Studio*"
+            "SQL Server Management Studio*"
+        )
+        ExcludePatterns  = @(
+            "*Setup*"
+            "*Language Pack*"
+            "*Shared Management Objects*"
+            "*Management Objects*"
+            "*Management Components*"
+            "*Tools*"
+            "*Components*"
+            "*Add-in*"
+            "*Prerequisites*"
         )
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft Visual Studio 2017 Tools for Applications"
         RegistryPatterns = @("*Visual Studio 2017 Tools for Applications*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft .NET Framework 4.5 SDK"
         RegistryPatterns = @(
             "*.NET Framework 4.5 SDK*"
             "*NET Framework 4.5 SDK*"
         )
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft .NET Framework 4.5 Targeting Pack"
         RegistryPatterns = @(
             "*.NET Framework 4.5*Targeting Pack*"
             "*NET Framework 4.5*Targeting Pack*"
         )
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft Internet Explorer 11"
         RegistryPatterns = @("*Internet Explorer*11*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @(
             "Internet-Explorer-Optional*"
             "Internet-Explorer-Optional-amd64"
         )
     }
+
     [PSCustomObject]@{
         Name             = "ABBYY FineReader PDF 14"
         RegistryPatterns = @("*ABBYY FineReader*14*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft ODBC Driver 13 for SQL Server"
         RegistryPatterns = @("*ODBC Driver 13 for SQL Server*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Java SE 11 (OpenJDK)"
         RegistryPatterns = @(
             "*OpenJDK*11*"
             "*OpenJDK 11*"
-            "*Java*11*"
             "*Temurin*11*"
             "*Adoptium*11*"
         )
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft Visual Studio 2019 Tools for Applications"
         RegistryPatterns = @("*Visual Studio 2019 Tools for Applications*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft Azure Information Protection Unified Labeling Client"
         RegistryPatterns = @(
             "*Azure Information Protection*Unified Labeling*"
             "*Azure Information Protection Client*"
         )
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Paint 3D"
         RegistryPatterns = @("*Paint 3D*")
+        ExcludePatterns  = @()
         AppxPatterns     = @(
             "*Microsoft.MSPaint*"
             "*MSPaint*"
         )
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft .NET Runtime 6"
         RegistryPatterns = @(
             "*Microsoft .NET Runtime*6*"
             "*Microsoft.NETCore.App*6*"
         )
+        ExcludePatterns  = @(
+            "*Desktop Runtime*"
+            "*Windows Desktop Runtime*"
+            "*Hosting Bundle*"
+            "*ASP.NET*"
+        )
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft .NET Desktop Runtime 6"
         RegistryPatterns = @(
@@ -230,44 +295,56 @@ $SoftwareChecks = @(
             "*Microsoft.WindowsDesktop.App*6*"
             "*Windows Desktop Runtime*6*"
         )
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "PSFTP 0.81"
         RegistryPatterns = @("*PSFTP*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "PuTTY 0.81"
         RegistryPatterns = @("*PuTTY*")
+        ExcludePatterns  = @("*PSFTP*")
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft SQL Server System CLR Types 2019"
         RegistryPatterns = @(
             "*SQL Server*System CLR Types*2019*"
             "*System CLR Types for SQL Server 2019*"
         )
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft SQL Server 2019 LocalDB"
         RegistryPatterns = @(
             "*SQL Server 2019 LocalDB*"
             "*Microsoft SQL Server 2019 LocalDB*"
         )
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Skype 8"
-        RegistryPatterns = @(
-            "*Skype*"
-            "*Skype version 8*"
+        RegistryPatterns = @("*Skype*")
+        ExcludePatterns  = @(
+            "*Skype for Business*"
+            "*Meeting Add-in*"
+            "*Teams Meeting Add-in*"
         )
         AppxPatterns     = @(
             "*Microsoft.SkypeApp*"
@@ -275,11 +352,18 @@ $SoftwareChecks = @(
         )
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft Remote Desktop"
         RegistryPatterns = @(
-            "*Microsoft Remote Desktop*"
-            "*Remote Desktop*"
+            "Microsoft Remote Desktop"
+            "Microsoft Remote Desktop*"
+        )
+        ExcludePatterns  = @(
+            "*WebRTC*"
+            "*Redirector*"
+            "*Multimedia*"
+            "*Services Infrastructure*"
         )
         AppxPatterns     = @(
             "*MicrosoftCorporationII.RemoteDesktop*"
@@ -288,9 +372,18 @@ $SoftwareChecks = @(
         )
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Microsoft Power BI Desktop"
-        RegistryPatterns = @("*Microsoft Power BI Desktop*")
+        RegistryPatterns = @(
+            "Microsoft Power BI Desktop"
+            "Microsoft Power BI Desktop*"
+        )
+        ExcludePatterns  = @(
+            "*Report Server*"
+            "*Gateway*"
+            "*Language Pack*"
+        )
         AppxPatterns     = @(
             "*Microsoft.MicrosoftPowerBIDesktop*"
             "*PowerBIDesktop*"
@@ -298,45 +391,64 @@ $SoftwareChecks = @(
         )
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Citrix Workspace App"
         RegistryPatterns = @(
             "*Citrix Workspace*"
             "*Citrix Receiver*"
         )
+        ExcludePatterns  = @(
+            "*Browser Content Redirection*"
+            "*HDX RealTime*"
+            "*Teams Redirection*"
+        )
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Chromium"
         RegistryPatterns = @("*Chromium*")
+        ExcludePatterns  = @()
         AppxPatterns     = @("*Chromium*")
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "IntelliJ IDEA Ultimate Edition"
         RegistryPatterns = @("*IntelliJ IDEA*Ultimate*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "3D Viewer"
         RegistryPatterns = @("*3D Viewer*")
+        ExcludePatterns  = @()
         AppxPatterns     = @(
             "*Microsoft.Microsoft3DViewer*"
             "*Microsoft3DViewer*"
         )
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Azure Data Studio"
         RegistryPatterns = @("*Azure Data Studio*")
+        ExcludePatterns  = @()
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
+
     [PSCustomObject]@{
         Name             = "Google Chrome"
         RegistryPatterns = @("*Google Chrome*")
+        ExcludePatterns  = @(
+            "*Update Helper*"
+            "*Elevation Service*"
+        )
         AppxPatterns     = @()
         FeaturePatterns  = @()
     }
@@ -364,10 +476,15 @@ function Test-WildcardMatch {
         [AllowNull()]
         [string]$Value,
 
+        [AllowNull()]
         [string[]]$Patterns
     )
 
     if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+
+    if ($null -eq $Patterns -or $Patterns.Count -eq 0) {
         return $false
     }
 
@@ -380,6 +497,28 @@ function Test-WildcardMatch {
     return $false
 }
 
+function Test-SoftwareNameMatch {
+    param (
+        [string]$Value,
+        [string[]]$IncludePatterns,
+        [string[]]$ExcludePatterns
+    )
+
+    $Included = Test-WildcardMatch `
+        -Value $Value `
+        -Patterns $IncludePatterns
+
+    if (-not $Included) {
+        return $false
+    }
+
+    $Excluded = Test-WildcardMatch `
+        -Value $Value `
+        -Patterns $ExcludePatterns
+
+    return (-not $Excluded)
+}
+
 function Get-InstalledProgramInventory {
 
     $RegistryLocations = @(
@@ -388,11 +527,13 @@ function Get-InstalledProgramInventory {
             Architecture = "64-bit"
             Scope        = "Machine"
         }
+
         [PSCustomObject]@{
             Path         = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
             Architecture = "32-bit"
             Scope        = "Machine"
         }
+
         [PSCustomObject]@{
             Path         = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
             Architecture = "Current user"
@@ -402,7 +543,9 @@ function Get-InstalledProgramInventory {
 
     $Inventory = foreach ($Location in $RegistryLocations) {
 
-        Get-ItemProperty -Path $Location.Path -ErrorAction SilentlyContinue |
+        Get-ItemProperty `
+            -Path $Location.Path `
+            -ErrorAction SilentlyContinue |
             Where-Object {
                 -not [string]::IsNullOrWhiteSpace($_.DisplayName)
             } |
@@ -421,7 +564,12 @@ function Get-InstalledProgramInventory {
 
     return @(
         $Inventory |
-            Sort-Object DetectedName, Version, Architecture, Scope -Unique
+            Sort-Object `
+                DetectedName,
+                Version,
+                Architecture,
+                Scope `
+                -Unique
     )
 }
 
@@ -430,16 +578,19 @@ function Get-AppxInventory {
     $Inventory = @()
 
     try {
-        $Inventory += Get-AppxPackage -AllUsers -ErrorAction Stop |
+        $Inventory += Get-AppxPackage `
+            -AllUsers `
+            -ErrorAction Stop |
             ForEach-Object {
                 [PSCustomObject]@{
                     DetectedName = [string]$_.Name
+                    PackageName  = [string]$_.PackageFullName
                     Version      = [string]$_.Version
                     Publisher    = [string]$_.Publisher
                     Architecture = [string]$_.Architecture
                     Scope        = "Installed Appx"
                     InstallType  = "Windows App"
-                    Source       = [string]$_.PackageFullName
+                    Source       = [string]$_.InstallLocation
                 }
             }
     }
@@ -448,16 +599,19 @@ function Get-AppxInventory {
     }
 
     try {
-        $Inventory += Get-AppxProvisionedPackage -Online -ErrorAction Stop |
+        $Inventory += Get-AppxProvisionedPackage `
+            -Online `
+            -ErrorAction Stop |
             ForEach-Object {
                 [PSCustomObject]@{
                     DetectedName = [string]$_.DisplayName
+                    PackageName  = [string]$_.PackageName
                     Version      = [string]$_.Version
                     Publisher    = ""
                     Architecture = [string]$_.Architecture
                     Scope        = "Provisioned Appx"
                     InstallType  = "Provisioned Windows App"
-                    Source       = [string]$_.PackageName
+                    Source       = [string]$_.PackagePath
                 }
             }
     }
@@ -467,7 +621,12 @@ function Get-AppxInventory {
 
     return @(
         $Inventory |
-            Sort-Object DetectedName, Version, Architecture, Scope -Unique
+            Sort-Object `
+                DetectedName,
+                PackageName,
+                Version,
+                Scope `
+                -Unique
     )
 }
 
@@ -475,7 +634,9 @@ function Get-OptionalFeatureInventory {
 
     try {
         return @(
-            Get-WindowsOptionalFeature -Online -ErrorAction Stop |
+            Get-WindowsOptionalFeature `
+                -Online `
+                -ErrorAction Stop |
                 ForEach-Object {
                     [PSCustomObject]@{
                         DetectedName = [string]$_.FeatureName
@@ -545,7 +706,9 @@ function Write-CombinedHtmlReport {
 
             try {
                 $ImportedResults = @(
-                    Import-Csv -LiteralPath $CsvPath -ErrorAction Stop
+                    Import-Csv `
+                        -LiteralPath $CsvPath `
+                        -ErrorAction Stop
                 )
 
                 $AllResults += $ImportedResults
@@ -555,7 +718,9 @@ function Write-CombinedHtmlReport {
                     LastWrite   = (Get-Item -LiteralPath $CsvPath).LastWriteTime
                     CheckedAt   = (
                         $ImportedResults |
-                            Select-Object -First 1 -ExpandProperty CheckedAt
+                            Select-Object `
+                                -First 1 `
+                                -ExpandProperty CheckedAt
                     )
                 }
             }
@@ -580,19 +745,26 @@ function Write-CombinedHtmlReport {
 
     $MachinesReported = @(
         $DeviceReportInformation.GetEnumerator() |
-            Where-Object { $_.Value.ReportFound }
+            Where-Object {
+                $_.Value.ReportFound
+            }
     ).Count
 
     $MachinesMissing = $Devices.Count - $MachinesReported
 
     $ApplicationsInstalled = @(
         $AllResults |
-            Where-Object { $_.Installed -eq "Yes" } |
-            Select-Object ComputerName, ExpectedItem -Unique
+            Where-Object {
+                $_.Installed -eq "Yes"
+            } |
+            Select-Object `
+                ComputerName,
+                ExpectedItem `
+                -Unique
     ).Count
 
     # ---------------------------------------------------------------------
-    # Machine status table
+    # Machine reporting-status table
     # ---------------------------------------------------------------------
 
     $MachineStatusRows = foreach ($Device in $Devices) {
@@ -621,7 +793,7 @@ function Write-CombinedHtmlReport {
     }
 
     # ---------------------------------------------------------------------
-    # Main matrix
+    # Application matrix
     # ---------------------------------------------------------------------
 
     $DeviceHeadings = foreach ($Device in $Devices) {
@@ -689,9 +861,7 @@ function Write-CombinedHtmlReport {
 
                 @"
 <strong>$(ConvertTo-HtmlSafe $Match.DetectedName)</strong><br>
-$(ConvertTo-HtmlSafe $VersionText)$(
-    ConvertTo-HtmlSafe $ArchitectureText
-)$ScopeText
+$(ConvertTo-HtmlSafe $VersionText)$(ConvertTo-HtmlSafe $ArchitectureText)$ScopeText
 "@
             }
 
@@ -722,18 +892,25 @@ $(ConvertTo-HtmlSafe $VersionText)$(
     }
 
     # ---------------------------------------------------------------------
-    # Detailed installed-item table
+    # Detailed detections
     # ---------------------------------------------------------------------
 
     $InstalledResults = @(
         $AllResults |
-            Where-Object { $_.Installed -eq "Yes" } |
-            Sort-Object ExpectedItem, ComputerName, DetectedName, Version
+            Where-Object {
+                $_.Installed -eq "Yes"
+            } |
+            Sort-Object `
+                ExpectedItem,
+                ComputerName,
+                DetectedName,
+                Version
     )
 
     if ($InstalledResults.Count -gt 0) {
 
         $DetailedRows = foreach ($Result in $InstalledResults) {
+
             @"
 <tr>
     <td>$(ConvertTo-HtmlSafe $Result.ExpectedItem)</td>
@@ -763,13 +940,16 @@ $(ConvertTo-HtmlSafe $VersionText)$(
     $Html = @"
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <title>Citrix Master Image Application Removal Report</title>
 
 <style>
+
     body {
         margin: 24px;
         font-family: "Segoe UI", Arial, sans-serif;
@@ -937,7 +1117,9 @@ $(ConvertTo-HtmlSafe $VersionText)$(
         color: #67717e;
         font-size: 12px;
     }
+
 </style>
+
 </head>
 
 <body>
@@ -977,6 +1159,7 @@ $(ConvertTo-HtmlSafe $VersionText)$(
 <div class="report-section">
 
 <table>
+
 <thead>
 <tr>
     <th>Machine</th>
@@ -984,9 +1167,11 @@ $(ConvertTo-HtmlSafe $VersionText)$(
     <th>Last checked</th>
 </tr>
 </thead>
+
 <tbody>
 $($MachineStatusRows -join "`n")
 </tbody>
+
 </table>
 
 </div>
@@ -996,6 +1181,7 @@ $($MachineStatusRows -join "`n")
 <div class="report-section">
 
 <table>
+
 <thead>
 <tr>
     <th>Application</th>
@@ -1003,17 +1189,28 @@ $($MachineStatusRows -join "`n")
     $($DeviceHeadings -join "`n")
 </tr>
 </thead>
+
 <tbody>
 $($MatrixRows -join "`n")
 </tbody>
+
 </table>
 
 <div class="legend">
-    <span class="legend-box legend-installed"></span>Installed
+
+    <span class="legend-box legend-installed"></span>
+    Installed
+
     &nbsp;&nbsp;
-    <span class="legend-box legend-missing"></span>Not installed
+
+    <span class="legend-box legend-missing"></span>
+    Not installed
+
     &nbsp;&nbsp;
-    <span class="legend-box legend-no-report"></span>No report received
+
+    <span class="legend-box legend-no-report"></span>
+    No report received
+
 </div>
 
 </div>
@@ -1023,6 +1220,7 @@ $($MatrixRows -join "`n")
 <div class="report-section">
 
 <table>
+
 <thead>
 <tr>
     <th>Expected application</th>
@@ -1035,9 +1233,11 @@ $($MatrixRows -join "`n")
     <th>Checked</th>
 </tr>
 </thead>
+
 <tbody>
 $($DetailedRows -join "`n")
 </tbody>
+
 </table>
 
 </div>
@@ -1048,21 +1248,23 @@ $($DetailedRows -join "`n")
 </p>
 
 </body>
+
 </html>
 "@
 
-    $FinalHtmlPath = Join-Path $Folder "Combined-AppRemoval-Report.html"
+    $FinalHtmlPath = Join-Path `
+        $Folder `
+        "Combined-AppRemoval-Report.html"
 
-    # Write to a temporary file first so the combined report is never left
-    # partially written if the script is interrupted.
     $TemporaryHtmlPath = Join-Path `
         $Folder `
         "Combined-AppRemoval-Report-$([guid]::NewGuid().Guid).tmp"
 
-    $Html | Out-File `
-        -LiteralPath $TemporaryHtmlPath `
-        -Encoding UTF8 `
-        -Force
+    $Html |
+        Out-File `
+            -LiteralPath $TemporaryHtmlPath `
+            -Encoding UTF8 `
+            -Force
 
     Move-Item `
         -LiteralPath $TemporaryHtmlPath `
@@ -1073,7 +1275,7 @@ $($DetailedRows -join "`n")
 }
 
 # -------------------------------------------------------------------------
-# Validate the machine and reporting folder
+# Validate machine and destination folder
 # -------------------------------------------------------------------------
 
 $CurrentComputer = $env:COMPUTERNAME.ToUpperInvariant()
@@ -1082,15 +1284,17 @@ Write-Host ""
 Write-Host "Computer: $CurrentComputer" -ForegroundColor Cyan
 
 if ($CurrentComputer -notin $ExpectedDevices) {
+
     Write-Warning @"
 $CurrentComputer is not in the expected master-image list.
 
-The inventory will still be collected, but this machine will not appear as
+The inventory will still be collected, but the machine will not appear as
 a column in the combined report unless it is added to `$ExpectedDevices.
 "@
 }
 
 if (-not (Test-Path -LiteralPath $ReportFolder)) {
+
     Write-Host "Creating report folder: $ReportFolder" -ForegroundColor Cyan
 
     New-Item `
@@ -1100,12 +1304,13 @@ if (-not (Test-Path -LiteralPath $ReportFolder)) {
         Out-Null
 }
 
-# Confirm that the script can write to the share before doing the inventory.
+# Test write access to the shared folder.
 $WriteTestPath = Join-Path `
     $ReportFolder `
     "$CurrentComputer-$([guid]::NewGuid().Guid).write-test"
 
 try {
+
     "Write test" |
         Out-File `
             -LiteralPath $WriteTestPath `
@@ -1117,20 +1322,21 @@ try {
         -Force
 }
 catch {
+
     throw @"
 Unable to write to the reporting folder:
 
 $ReportFolder
 
-Check the share, NTFS permissions and the account being used to run the
-script.
+Check the share permissions, NTFS permissions and the account running
+PowerShell.
 
 Error: $($_.Exception.Message)
 "@
 }
 
 # -------------------------------------------------------------------------
-# Collect inventories
+# Collect software inventories
 # -------------------------------------------------------------------------
 
 Write-Host "Reading traditional installed programs..." -ForegroundColor Cyan
@@ -1150,18 +1356,22 @@ $Results = foreach ($Check in $SoftwareChecks) {
 
     $Matches = @()
 
+    # Traditional installed applications
     if ($Check.RegistryPatterns.Count -gt 0) {
 
         $RegistryMatches = @(
             $InstalledPrograms |
                 Where-Object {
-                    Test-WildcardMatch `
+
+                    Test-SoftwareNameMatch `
                         -Value $_.DetectedName `
-                        -Patterns $Check.RegistryPatterns
+                        -IncludePatterns $Check.RegistryPatterns `
+                        -ExcludePatterns $Check.ExcludePatterns
                 }
         )
 
         foreach ($Match in $RegistryMatches) {
+
             $Matches += New-SoftwareResult `
                 -ExpectedItem $Check.Name `
                 -Installed $true `
@@ -1175,18 +1385,27 @@ $Results = foreach ($Check in $SoftwareChecks) {
         }
     }
 
+    # Installed and provisioned Windows Apps
     if ($Check.AppxPatterns.Count -gt 0) {
 
         $AppxMatches = @(
             $AppxPackages |
                 Where-Object {
-                    Test-WildcardMatch `
+
+                    $NameMatch = Test-WildcardMatch `
                         -Value $_.DetectedName `
                         -Patterns $Check.AppxPatterns
+
+                    $PackageMatch = Test-WildcardMatch `
+                        -Value $_.PackageName `
+                        -Patterns $Check.AppxPatterns
+
+                    $NameMatch -or $PackageMatch
                 }
         )
 
         foreach ($Match in $AppxMatches) {
+
             $Matches += New-SoftwareResult `
                 -ExpectedItem $Check.Name `
                 -Installed $true `
@@ -1200,11 +1419,13 @@ $Results = foreach ($Check in $SoftwareChecks) {
         }
     }
 
+    # Windows optional features
     if ($Check.FeaturePatterns.Count -gt 0) {
 
         $FeatureMatches = @(
             $OptionalFeatures |
                 Where-Object {
+
                     $_.State -eq "Enabled" -and
                     (
                         Test-WildcardMatch `
@@ -1215,6 +1436,7 @@ $Results = foreach ($Check in $SoftwareChecks) {
         )
 
         foreach ($Match in $FeatureMatches) {
+
             $Matches += New-SoftwareResult `
                 -ExpectedItem $Check.Name `
                 -Installed $true `
@@ -1250,7 +1472,7 @@ $Results = foreach ($Check in $SoftwareChecks) {
 }
 
 # -------------------------------------------------------------------------
-# Upload this machine's results
+# Upload current machine's CSV report
 # -------------------------------------------------------------------------
 
 $MachineCsvPath = Join-Path `
@@ -1262,14 +1484,17 @@ $TemporaryCsvPath = Join-Path `
     "$CurrentComputer-AppRemoval-$([guid]::NewGuid().Guid).tmp"
 
 $Results |
-    Sort-Object ExpectedItem, Installed, DetectedName, Version |
+    Sort-Object `
+        ExpectedItem,
+        Installed,
+        DetectedName,
+        Version |
     Export-Csv `
         -LiteralPath $TemporaryCsvPath `
         -NoTypeInformation `
         -Encoding UTF8 `
         -Force
 
-# Replace the previous report atomically.
 Move-Item `
     -LiteralPath $TemporaryCsvPath `
     -Destination $MachineCsvPath `
@@ -1280,7 +1505,7 @@ Write-Host "Machine report uploaded:" -ForegroundColor Green
 Write-Host $MachineCsvPath
 
 # -------------------------------------------------------------------------
-# Rebuild the combined report
+# Rebuild combined HTML report
 # -------------------------------------------------------------------------
 
 $CombinedReportPath = Write-CombinedHtmlReport `
@@ -1293,13 +1518,17 @@ Write-Host "Combined report updated:" -ForegroundColor Green
 Write-Host $CombinedReportPath
 
 # -------------------------------------------------------------------------
-# Display local results
+# Display current machine's detections
 # -------------------------------------------------------------------------
 
 $LocalInstalledCount = @(
     $Results |
-        Where-Object { $_.Installed -eq "Yes" } |
-        Select-Object ExpectedItem -Unique
+        Where-Object {
+            $_.Installed -eq "Yes"
+        } |
+        Select-Object `
+            ExpectedItem `
+            -Unique
 ).Count
 
 Write-Host ""
@@ -1314,7 +1543,9 @@ $Results |
         Version,
         Architecture,
         InstallType |
-    Sort-Object ExpectedItem, DetectedName |
+    Sort-Object `
+        ExpectedItem,
+        DetectedName |
     Format-Table -AutoSize
 
 Write-Host ""
