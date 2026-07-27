@@ -50,6 +50,9 @@ $ExpectedDevices = @(
 # ExcludePatterns:
 #   Excludes supporting components that might otherwise match.
 #
+# MaximumVersionMajor:
+#   Optional maximum permitted DisplayVersion major number.
+#
 # AppxPatterns:
 #   Matches installed or provisioned Windows Apps.
 #
@@ -60,397 +63,437 @@ $ExpectedDevices = @(
 $SoftwareChecks = @(
 
     [PSCustomObject]@{
-        Name             = "Microsoft Visual C++ 2005 Redistributable"
-        RegistryPatterns = @("*Microsoft Visual C++ 2005*Redistributable*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "Microsoft Visual C++ 2005 Redistributable"
+        RegistryPatterns    = @("*Microsoft Visual C++ 2005*Redistributable*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft Visual C++ 2010 Redistributable"
-        RegistryPatterns = @("*Microsoft Visual C++ 2010*Redistributable*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "Microsoft Visual C++ 2010 Redistributable"
+        RegistryPatterns    = @("*Microsoft Visual C++ 2010*Redistributable*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft SQL Server 2012 Native Client"
-        RegistryPatterns = @("*SQL Server 2012 Native Client*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "Microsoft SQL Server 2012 Native Client"
+        RegistryPatterns    = @("*SQL Server 2012 Native Client*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft Visual C++ 2013 Redistributable"
-        RegistryPatterns = @("*Microsoft Visual C++ 2013*Redistributable*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "Microsoft Visual C++ 2013 Redistributable"
+        RegistryPatterns    = @("*Microsoft Visual C++ 2013*Redistributable*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft SQL Server System CLR Types 2014"
+        Name = "Microsoft SQL Server System CLR Types 2014"
         RegistryPatterns = @(
             "*SQL Server*System CLR Types*2014*"
             "*System CLR Types for SQL Server 2014*"
         )
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft Visual Studio 2015 Tools for Applications"
-        RegistryPatterns = @("*Visual Studio 2015 Tools for Applications*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "Microsoft Visual Studio 2015 Tools for Applications"
+        RegistryPatterns    = @("*Visual Studio 2015 Tools for Applications*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft Visual Studio 2015 Shell (Isolated)"
-        RegistryPatterns = @("*Visual Studio 2015 Shell*Isolated*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "Microsoft Visual Studio 2015 Shell (Isolated)"
+        RegistryPatterns    = @("*Visual Studio 2015 Shell*Isolated*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft SQL Server 2016 Integration Services"
-        RegistryPatterns = @("*SQL Server 2016 Integration Services*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "Microsoft SQL Server 2016 Integration Services"
+        RegistryPatterns    = @("*SQL Server 2016 Integration Services*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft SQL Server System CLR Types 2016"
+        Name = "Microsoft SQL Server System CLR Types 2016"
         RegistryPatterns = @(
             "*SQL Server*System CLR Types*2016*"
             "*System CLR Types for SQL Server 2016*"
         )
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft OData Source 13 for Microsoft SQL Server 2016"
+        Name = "Microsoft OData Source 13 for Microsoft SQL Server 2016"
         RegistryPatterns = @(
             "*OData Source*SQL Server 2016*"
             "*Microsoft OData Source 13*"
         )
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
-    # This checks only the main SQL Server Management Studio installation.
-    # Supporting SQL Server components are explicitly excluded.
+    # SQL Server Management Studio 2016 or older.
+    #
+    # SQL Server 2016 / SSMS 16.x uses product DisplayVersion 13.x.
+    # Any matching SSMS product with DisplayVersion major 13 or lower
+    # will be included.
+    #
+    # Modern SSMS versions such as 18, 19, 20, 21 and 22 are excluded
+    # because their DisplayVersion major is greater than 13.
     [PSCustomObject]@{
-        Name             = "Microsoft SQL Server 2016 Management Studio"
+        Name = "Microsoft SQL Server Management Studio 2016 or older"
         RegistryPatterns = @(
-            "Microsoft SQL Server 2016 Management Studio"
-            "Microsoft SQL Server Management Studio*"
-            "SQL Server Management Studio*"
+            "*SQL Server Management Studio*"
         )
-        ExcludePatterns  = @(
+        ExcludePatterns = @(
+            "*Analysis Services*"
+            "*Reporting Services*"
             "*Setup*"
             "*Language Pack*"
             "*Shared Management Objects*"
             "*Management Objects*"
             "*Management Components*"
-            "*Tools*"
-            "*Components*"
             "*Add-in*"
             "*Prerequisites*"
         )
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        MaximumVersionMajor = 13
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft Visual Studio 2017 Tools for Applications"
-        RegistryPatterns = @("*Visual Studio 2017 Tools for Applications*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "Microsoft Visual Studio 2017 Tools for Applications"
+        RegistryPatterns    = @("*Visual Studio 2017 Tools for Applications*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft .NET Framework 4.5 SDK"
+        Name = "Microsoft .NET Framework 4.5 SDK"
         RegistryPatterns = @(
             "*.NET Framework 4.5 SDK*"
             "*NET Framework 4.5 SDK*"
         )
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft .NET Framework 4.5 Targeting Pack"
+        Name = "Microsoft .NET Framework 4.5 Targeting Pack"
         RegistryPatterns = @(
             "*.NET Framework 4.5*Targeting Pack*"
             "*NET Framework 4.5*Targeting Pack*"
         )
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft Internet Explorer 11"
-        RegistryPatterns = @("*Internet Explorer*11*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @(
+        Name                = "Microsoft Internet Explorer 11"
+        RegistryPatterns    = @("*Internet Explorer*11*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns = @(
             "Internet-Explorer-Optional*"
             "Internet-Explorer-Optional-amd64"
         )
     }
 
     [PSCustomObject]@{
-        Name             = "ABBYY FineReader PDF 14"
-        RegistryPatterns = @("*ABBYY FineReader*14*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "ABBYY FineReader PDF 14"
+        RegistryPatterns    = @("*ABBYY FineReader*14*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft ODBC Driver 13 for SQL Server"
-        RegistryPatterns = @("*ODBC Driver 13 for SQL Server*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "Microsoft ODBC Driver 13 for SQL Server"
+        RegistryPatterns    = @("*ODBC Driver 13 for SQL Server*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Java SE 11 (OpenJDK)"
+        Name = "Java SE 11 (OpenJDK)"
         RegistryPatterns = @(
             "*OpenJDK*11*"
             "*OpenJDK 11*"
             "*Temurin*11*"
             "*Adoptium*11*"
         )
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft Visual Studio 2019 Tools for Applications"
-        RegistryPatterns = @("*Visual Studio 2019 Tools for Applications*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "Microsoft Visual Studio 2019 Tools for Applications"
+        RegistryPatterns    = @("*Visual Studio 2019 Tools for Applications*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft Azure Information Protection Unified Labeling Client"
+        Name = "Microsoft Azure Information Protection Unified Labeling Client"
         RegistryPatterns = @(
             "*Azure Information Protection*Unified Labeling*"
             "*Azure Information Protection Client*"
         )
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Paint 3D"
-        RegistryPatterns = @("*Paint 3D*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @(
+        Name                = "Paint 3D"
+        RegistryPatterns    = @("*Paint 3D*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns = @(
             "*Microsoft.MSPaint*"
             "*MSPaint*"
         )
-        FeaturePatterns  = @()
+        FeaturePatterns = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft .NET Runtime 6"
+        Name = "Microsoft .NET Runtime 6"
         RegistryPatterns = @(
             "*Microsoft .NET Runtime*6*"
             "*Microsoft.NETCore.App*6*"
         )
-        ExcludePatterns  = @(
+        ExcludePatterns = @(
             "*Desktop Runtime*"
             "*Windows Desktop Runtime*"
             "*Hosting Bundle*"
             "*ASP.NET*"
         )
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft .NET Desktop Runtime 6"
+        Name = "Microsoft .NET Desktop Runtime 6"
         RegistryPatterns = @(
             "*Microsoft Windows Desktop Runtime*6*"
             "*Microsoft.WindowsDesktop.App*6*"
             "*Windows Desktop Runtime*6*"
         )
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "PSFTP 0.81"
-        RegistryPatterns = @("*PSFTP*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "PSFTP 0.81"
+        RegistryPatterns    = @("*PSFTP*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "PuTTY 0.81"
-        RegistryPatterns = @("*PuTTY*")
-        ExcludePatterns  = @("*PSFTP*")
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "PuTTY 0.81"
+        RegistryPatterns    = @("*PuTTY*")
+        ExcludePatterns     = @("*PSFTP*")
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft SQL Server System CLR Types 2019"
+        Name = "Microsoft SQL Server System CLR Types 2019"
         RegistryPatterns = @(
             "*SQL Server*System CLR Types*2019*"
             "*System CLR Types for SQL Server 2019*"
         )
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft SQL Server 2019 LocalDB"
+        Name = "Microsoft SQL Server 2019 LocalDB"
         RegistryPatterns = @(
             "*SQL Server 2019 LocalDB*"
             "*Microsoft SQL Server 2019 LocalDB*"
         )
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Skype 8"
-        RegistryPatterns = @("*Skype*")
-        ExcludePatterns  = @(
+        Name                = "Skype 8"
+        RegistryPatterns    = @("*Skype*")
+        ExcludePatterns = @(
             "*Skype for Business*"
             "*Meeting Add-in*"
             "*Teams Meeting Add-in*"
         )
-        AppxPatterns     = @(
+        MaximumVersionMajor = $null
+        AppxPatterns = @(
             "*Microsoft.SkypeApp*"
             "*SkypeApp*"
         )
-        FeaturePatterns  = @()
+        FeaturePatterns = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft Remote Desktop"
+        Name = "Microsoft Remote Desktop"
         RegistryPatterns = @(
             "Microsoft Remote Desktop"
             "Microsoft Remote Desktop*"
         )
-        ExcludePatterns  = @(
+        ExcludePatterns = @(
             "*WebRTC*"
             "*Redirector*"
             "*Multimedia*"
             "*Services Infrastructure*"
         )
-        AppxPatterns     = @(
+        MaximumVersionMajor = $null
+        AppxPatterns = @(
             "*MicrosoftCorporationII.RemoteDesktop*"
             "*Microsoft.RemoteDesktop*"
             "*RemoteDesktop*"
         )
-        FeaturePatterns  = @()
+        FeaturePatterns = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Microsoft Power BI Desktop"
+        Name = "Microsoft Power BI Desktop"
         RegistryPatterns = @(
             "Microsoft Power BI Desktop"
             "Microsoft Power BI Desktop*"
         )
-        ExcludePatterns  = @(
+        ExcludePatterns = @(
             "*Report Server*"
             "*Gateway*"
             "*Language Pack*"
         )
-        AppxPatterns     = @(
+        MaximumVersionMajor = $null
+        AppxPatterns = @(
             "*Microsoft.MicrosoftPowerBIDesktop*"
             "*PowerBIDesktop*"
             "*PowerBI*"
         )
-        FeaturePatterns  = @()
+        FeaturePatterns = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Citrix Workspace App"
+        Name = "Citrix Workspace App"
         RegistryPatterns = @(
             "*Citrix Workspace*"
             "*Citrix Receiver*"
         )
-        ExcludePatterns  = @(
+        ExcludePatterns = @(
             "*Browser Content Redirection*"
             "*HDX RealTime*"
             "*Teams Redirection*"
         )
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Chromium"
-        RegistryPatterns = @("*Chromium*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @("*Chromium*")
-        FeaturePatterns  = @()
+        Name                = "Chromium"
+        RegistryPatterns    = @("*Chromium*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @("*Chromium*")
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "IntelliJ IDEA Ultimate Edition"
-        RegistryPatterns = @("*IntelliJ IDEA*Ultimate*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "IntelliJ IDEA Ultimate Edition"
+        RegistryPatterns    = @("*IntelliJ IDEA*Ultimate*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "3D Viewer"
-        RegistryPatterns = @("*3D Viewer*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @(
+        Name                = "3D Viewer"
+        RegistryPatterns    = @("*3D Viewer*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns = @(
             "*Microsoft.Microsoft3DViewer*"
             "*Microsoft3DViewer*"
         )
-        FeaturePatterns  = @()
+        FeaturePatterns = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Azure Data Studio"
-        RegistryPatterns = @("*Azure Data Studio*")
-        ExcludePatterns  = @()
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        Name                = "Azure Data Studio"
+        RegistryPatterns    = @("*Azure Data Studio*")
+        ExcludePatterns     = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 
     [PSCustomObject]@{
-        Name             = "Google Chrome"
-        RegistryPatterns = @("*Google Chrome*")
-        ExcludePatterns  = @(
+        Name                = "Google Chrome"
+        RegistryPatterns    = @("*Google Chrome*")
+        ExcludePatterns = @(
             "*Update Helper*"
             "*Elevation Service*"
         )
-        AppxPatterns     = @()
-        FeaturePatterns  = @()
+        MaximumVersionMajor = $null
+        AppxPatterns        = @()
+        FeaturePatterns     = @()
     }
 )
 
@@ -517,6 +560,28 @@ function Test-SoftwareNameMatch {
         -Patterns $ExcludePatterns
 
     return (-not $Excluded)
+}
+
+function Get-VersionMajor {
+    param (
+        [AllowNull()]
+        [string]$Version
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        return $null
+    }
+
+    $VersionMatch = [regex]::Match(
+        $Version,
+        '^\s*(\d+)'
+    )
+
+    if (-not $VersionMatch.Success) {
+        return $null
+    }
+
+    return [int]$VersionMatch.Groups[1].Value
 }
 
 function Get-InstalledProgramInventory {
@@ -718,9 +783,7 @@ function Write-CombinedHtmlReport {
                     LastWrite   = (Get-Item -LiteralPath $CsvPath).LastWriteTime
                     CheckedAt   = (
                         $ImportedResults |
-                            Select-Object `
-                                -First 1 `
-                                -ExpandProperty CheckedAt
+                            Select-Object -First 1 -ExpandProperty CheckedAt
                     )
                 }
             }
@@ -757,14 +820,11 @@ function Write-CombinedHtmlReport {
             Where-Object {
                 $_.Installed -eq "Yes"
             } |
-            Select-Object `
-                ComputerName,
-                ExpectedItem `
-                -Unique
+            Select-Object ComputerName, ExpectedItem -Unique
     ).Count
 
     # ---------------------------------------------------------------------
-    # Machine reporting-status table
+    # Machine reporting status
     # ---------------------------------------------------------------------
 
     $MachineStatusRows = foreach ($Device in $Devices) {
@@ -1304,7 +1364,7 @@ if (-not (Test-Path -LiteralPath $ReportFolder)) {
         Out-Null
 }
 
-# Test write access to the shared folder.
+# Test write access.
 $WriteTestPath = Join-Path `
     $ReportFolder `
     "$CurrentComputer-$([guid]::NewGuid().Guid).write-test"
@@ -1356,7 +1416,7 @@ $Results = foreach ($Check in $SoftwareChecks) {
 
     $Matches = @()
 
-    # Traditional installed applications
+    # Traditional installed applications.
     if ($Check.RegistryPatterns.Count -gt 0) {
 
         $RegistryMatches = @(
@@ -1369,6 +1429,24 @@ $Results = foreach ($Check in $SoftwareChecks) {
                         -ExcludePatterns $Check.ExcludePatterns
                 }
         )
+
+        # Apply an optional maximum DisplayVersion major.
+        if ($null -ne $Check.MaximumVersionMajor) {
+
+            $MaximumMajor = [int]$Check.MaximumVersionMajor
+
+            $RegistryMatches = @(
+                $RegistryMatches |
+                    Where-Object {
+
+                        $DetectedMajor = Get-VersionMajor `
+                            -Version $_.Version
+
+                        $null -ne $DetectedMajor -and
+                        $DetectedMajor -le $MaximumMajor
+                    }
+            )
+        }
 
         foreach ($Match in $RegistryMatches) {
 
@@ -1385,7 +1463,7 @@ $Results = foreach ($Check in $SoftwareChecks) {
         }
     }
 
-    # Installed and provisioned Windows Apps
+    # Installed and provisioned Windows Apps.
     if ($Check.AppxPatterns.Count -gt 0) {
 
         $AppxMatches = @(
@@ -1419,7 +1497,7 @@ $Results = foreach ($Check in $SoftwareChecks) {
         }
     }
 
-    # Windows optional features
+    # Windows optional features.
     if ($Check.FeaturePatterns.Count -gt 0) {
 
         $FeatureMatches = @(
@@ -1472,7 +1550,7 @@ $Results = foreach ($Check in $SoftwareChecks) {
 }
 
 # -------------------------------------------------------------------------
-# Upload current machine's CSV report
+# Upload current machine's CSV
 # -------------------------------------------------------------------------
 
 $MachineCsvPath = Join-Path `
@@ -1526,9 +1604,7 @@ $LocalInstalledCount = @(
         Where-Object {
             $_.Installed -eq "Yes"
         } |
-        Select-Object `
-            ExpectedItem `
-            -Unique
+        Select-Object ExpectedItem -Unique
 ).Count
 
 Write-Host ""
