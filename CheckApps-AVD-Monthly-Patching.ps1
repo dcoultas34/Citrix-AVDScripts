@@ -1,4 +1,3 @@
-﻿[CmdletBinding()]
 param(
   [string]$ShareRoot = "\\cukavdukwprod01.file.core.windows.net\profiles\reports\Patching",
   [string]$Period    = (Get-Date).ToString("MMMM yyyy"),
@@ -321,7 +320,7 @@ ul { margin: 6px 0 12px 18px; }
     </tbody>
   </table>
 
-  <h3>OS updates – recent 3 (excluding this month)</h3>
+  <h3>OS updates - recent 3 (excluding this month)</h3>
   <table>
     <thead><tr><th>KB</th><th>Description</th><th>Installed On</th></tr></thead>
     <tbody>
@@ -339,7 +338,7 @@ ul { margin: 6px 0 12px 18px; }
 <h1>$Title</h1>
 $headerBlock
 $(($sections -join "`n"))
-<p class='small'>Apps: green = latest installed; red = update available. If Evergreen Stable exists we use it; otherwise winget. If winget is newer than Evergreen, the <em>Latest</em> cell shows that version in <span class='info'>blue</span> with “waiting on Evergreen release”.</p>
+<p class='small'>Apps: green = latest installed; red = update available. If Evergreen Stable exists we use it; otherwise winget. If winget is newer than Evergreen, the <em>Latest</em> cell shows that version in <span class='info'>blue</span> with "waiting on Evergreen release".</p>
 <p class='small'>OS: dates shown as DD/MM/YYYY. We show updates applied <strong>this month</strong> (green) and the <strong>previous 3 updates</strong> excluding this month.</p>
 <p class='small'>Generated: $(Get-Date)</p>
 </body>
