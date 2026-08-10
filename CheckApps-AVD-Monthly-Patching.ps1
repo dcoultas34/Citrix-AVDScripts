@@ -1,553 +1,626 @@
 param(
-  [string]$ShareRoot = "\\cukavdukwprod01.file.core.windows.net\profiles\reports\Patching",
-  [string]$Period    = (Get-Date).ToString("MMMM yyyy"),
-  [switch]$Combine,
-  [switch]$NoCombine
+  [switch]$Upgrade,                 # perform upgrades (installed apps only)
+  [switch]$IncludeWindowsUpdate,    # try OS updates (requires PSWindowsUpdate)
+  [switch]$WindowsUpdateOnly,       # do only Windows Updates, skip app upgrades
+  [switch]$WhatIf,                  # dry-run the actions
+  [switch]$NoHtml,                  # never write/open the HTML report
+  [switch]$HtmlOnlyWhenGreen,       # write/open HTML only when all installed apps are green
+  [switch]$NoCsv,                   # skip CSV export
+  [switch]$NoReports,               # shorthand: implies -NoCsv and -NoHtml
+  [switch]$DisableMsStore           # disable 'msstore' source in winget for this session/user
 )
 
-# ---------------------- AVD master images ----------------------
-$MasterMap = @(
-  @{ Master='CUK-AVDGI-P-001'; Environment='Production' }
-  @{ Master='CUK-AVDGI-P-002'; Environment='Production' }
-) | ForEach-Object { [pscustomobject]$_ }
+# Shorthand
+if ($NoReports) { $NoCsv = $true; $NoHtml = $true }
 
-# ---------------------- Applications to check ----------------------
+<# =======================
+   Apps to check / update
+   ======================= #>
 $AppsToCheck = @(
-  @{ Name="Adobe Acrobat";           IsAdobeFull=$true;  LocalMatch=$null; EvergreenName=$null; WingetId=$null; ExpectEvergreen=$false }
-  @{ Name="Microsoft Office 365"; LocalMatch="__OFFICE_C2R__"; EvergreenName="Microsoft365Apps"; PreferredChannel="MonthlyEnterprise"; WingetId="Microsoft.Office"; ExpectEvergreen=$true }
-  #@{ Name="Adobe Acrobat Reader";    LocalMatch="Adobe Acrobat Reader"; EvergreenName="AdobeAcrobatReaderDC"; WingetId="Adobe.Acrobat.Reader.64-bit"; ExpectEvergreen=$false }
-  @{ Name="Google Chrome";           LocalMatch="Google Chrome";        EvergreenName="GoogleChrome";         WingetId="Google.Chrome";               ExpectEvergreen=$false }
-  @{ Name="Microsoft Edge";          LocalMatch="Microsoft Edge";       EvergreenName="MicrosoftEdge";        WingetId="Microsoft.Edge";              ExpectEvergreen=$false }
-  @{ Name="Visual Studio Code";      LocalMatch="Microsoft Visual Studio Code"; EvergreenName="MicrosoftVisualStudioCode"; WingetId="Microsoft.VisualStudioCode"; ExpectEvergreen=$false }
-  @{ Name="Power BI Desktop";        LocalMatch="Microsoft Power BI Desktop";   EvergreenName="MicrosoftPowerBIDesktop";    WingetId="Microsoft.PowerBI";         ExpectEvergreen=$false }
-  @{ Name="Microsoft Teams";         LocalMatch="Microsoft Teams";      EvergreenName=$null; WingetId="Microsoft.Teams";  ExpectEvergreen=$false }
-  @{ Name="OneDrive";                LocalMatch="Microsoft OneDrive";   EvergreenName=$null; WingetId="Microsoft.OneDrive"; ExpectEvergreen=$false }
-  @{ Name="Azure Data Studio";       LocalMatch="Azure Data Studio";    EvergreenName=$null; WingetId="Microsoft.AzureDataStudio"; ExpectEvergreen=$false }
+    @{ Name="Windows Updates";         LocalMatch="__WINDOWS_UPDATE__";           LatestProvider="None";      EvergreenName=$null;                       WingetId=$null }
+
+    @{ Name="Microsoft Office 365";    LocalMatch="__OFFICE_C2R__";               LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Microsoft.Office" }
+
+    # Evergreen-first (vendor data), winget fallback
+    @{ Name="Google Chrome";           LocalMatch="Google Chrome";                LatestProvider="Evergreen"; EvergreenName="GoogleChrome";              WingetId="Google.Chrome" }
+    @{ Name="Microsoft Edge";          LocalMatch="Microsoft Edge";               LatestProvider="Evergreen"; EvergreenName="MicrosoftEdge";              WingetId="Microsoft.Edge" }
+    @{ Name="Visual Studio Code";      LocalMatch="Microsoft Visual Studio Code"; LatestProvider="Evergreen"; EvergreenName="MicrosoftVisualStudioCode"; WingetId="Microsoft.VisualStudioCode" }
+    @{ Name="Power BI Desktop";        LocalMatch="Microsoft Power BI Desktop";   LatestProvider="Evergreen"; EvergreenName="MicrosoftPowerBIDesktop";    WingetId="Microsoft.PowerBI" }
+
+    # Winget for latest
+    @{ Name="Adobe Acrobat Reader";    LocalMatch="Adobe Acrobat Reader";         LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Adobe.Acrobat.Reader.64-bit" }
+
+    # Full Acrobat tracked separately (no latest lookup)
+    @{ Name="Adobe Acrobat (full)";    LocalMatch="Adobe Acrobat";                LatestProvider="None";      EvergreenName=$null;                       WingetId=$null }
+
+    @{ Name="Microsoft Teams";         LocalMatch="Microsoft Teams";              LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Microsoft.Teams" }
+    @{ Name="OneDrive";                LocalMatch="Microsoft OneDrive";           LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Microsoft.OneDrive" }
+    @{ Name="GitHub Desktop";          LocalMatch="GitHub Desktop";               LatestProvider="Winget";    EvergreenName=$null;                       WingetId="GitHub.GitHubDesktop" }
+    @{ Name="Azure Data Studio";       LocalMatch="Azure Data Studio";            LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Microsoft.AzureDataStudio" }
 )
 
-# ---------------------- Utilities ----------------------
-function Test-WingetReady  { try { $null = Get-Command winget -ErrorAction Stop; winget --version | Out-Null; $true } catch { $false } }
-function Test-EvergreenReady { try { $m = Get-Module -ListAvailable -Name Evergreen; if ($m){Import-Module Evergreen -ErrorAction SilentlyContinue|Out-Null;$true}else{$false} } catch { $false } }
+$ReportPath  = Join-Path $env:PUBLIC "AVD-AppUpdateReport.html"
+$CsvPath     = Join-Path $env:PUBLIC "AVD-AppUpdateReport.csv"
+$LogPath     = Join-Path $env:PUBLIC "AVD-AppUpdateActions.log"
 
-function Get-InstalledVersion {
-  param([string]$DisplayNameMatch)
-
-  if ($DisplayNameMatch -eq "Microsoft Teams") {
-    $pkgs=@(); foreach($n in 'MSTeams','MicrosoftTeams'){ try{$pkgs+=Get-AppxPackage -AllUsers -Name $n -ErrorAction SilentlyContinue}catch{}; try{$pkgs+=Get-AppxPackage -Name $n -ErrorAction SilentlyContinue}catch{} }
-    $pkg=$pkgs|Where-Object{$_}|Sort-Object Version -Descending|Select-Object -First 1
-    if($pkg){ return $pkg.Version.ToString() }
-  }
-
-  if ($DisplayNameMatch -eq "__OFFICE_C2R__") {
-    try{
-      $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry64)
-      $sub=$base.OpenSubKey('SOFTWARE\Microsoft\Office\ClickToRun\Configuration')
-      $v=$sub.GetValue('VersionToReport'); if($v){return $v}
-    }catch{}; return $null
-  }
-
-  if ($DisplayNameMatch -eq "Microsoft Visual Studio Code") {
-    foreach($p in @("$env:LOCALAPPDATA\Programs\Microsoft VS Code\Code.exe","$env:ProgramFiles\Microsoft VS Code\Code.exe","${env:ProgramFiles(x86)}\Microsoft VS Code\Code.exe")){
-      if(Test-Path $p){ try{ return (Get-Item $p).VersionInfo.ProductVersion }catch{} }
-    }
-  }
-
-  $entries=@()
-  $targets=@(
-    @{Hive='LocalMachine'; View='Registry64'; Path='SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'},
-    @{Hive='LocalMachine'; View='Registry64'; Path='SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'},
-    @{Hive='LocalMachine'; View='Registry32'; Path='SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'},
-    @{Hive='CurrentUser' ; View='Default'   ; Path='Software\Microsoft\Windows\CurrentVersion\Uninstall'}
-  )
-  foreach($t in $targets){
-    try{
-      $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::$($t.Hive),[Microsoft.Win32.RegistryView]::$($t.View))
-      $key=$base.OpenSubKey($t.Path); if(-not $key){continue}
-      foreach($n in $key.GetSubKeyNames()){
-        try{ $s=$key.OpenSubKey($n); $dn=$s.GetValue('DisplayName'); if(-not $dn){continue}; $dv=$s.GetValue('DisplayVersion'); $entries+=[pscustomobject]@{DisplayName=$dn;DisplayVersion=$dv} }catch{}
-      }
-    }catch{}
-  }
-  $nameExcludes='WebView','Runtime','WebView2','Updater','Update','AutoUpdate','Maintenance','Service','Helper','Crashpad','Stub','Machine-wide','User Installer','System Installer','Setup'
-  $cands=@()
-  foreach($e in $entries){
-    if($e.DisplayName -notlike "*$DisplayNameMatch*"){continue}
-    if($nameExcludes | Where-Object { $e.DisplayName -match [regex]::Escape($_) }){continue}
-    $dv=$e.DisplayVersion
-    $vObj=$null; if($dv){ try{$vObj=[version]($dv -replace '[^\d\.]','')}catch{} }
-    $score= if($e.DisplayName -ieq $DisplayNameMatch){3}elseif($e.DisplayName -ilike "$DisplayNameMatch*"){2}else{1}
-    $cands += [pscustomobject]@{DisplayName=$e.DisplayName;DisplayVersion=$dv;VersionObj=$vObj;Score=$score}
-  }
-  if($cands.Count -eq 0){return $null}
-  ($cands | Sort-Object @{e='Score';Descending=$true}, @{e='VersionObj';Descending=$true} | Select-Object -First 1).DisplayVersion
+# Prefer D:\_Source\_AppUpdates for Evergreen downloads, with fallbacks
+$DownloadDirCandidates = @(
+  "D:\_Source\_AppUpdates",
+  "C:\_Source\_AppUpdates",
+  (Join-Path $env:ProgramData "AVD-AppDownloads")
+)
+$DownloadDir = $null
+foreach ($p in $DownloadDirCandidates) {
+    try {
+        if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
+        $DownloadDir = $p; break
+    } catch { }
 }
+if (-not $DownloadDir) { throw "Could not create a download directory in any candidate path." }
+Write-Host "Evergreen download directory: $DownloadDir" -ForegroundColor DarkGray
 
-# -------- Adobe Acrobat (Full/DC/Pro) robust detection --------
-function Get-AdobeFullInstalledVersion {
-  $paths = @(
-    'HKLM:\SOFTWARE\Adobe\Adobe Acrobat',
-    'HKLM:\SOFTWARE\WOW6432Node\Adobe\Adobe Acrobat',
-    'HKLM:\SOFTWARE\Adobe\Acrobat',
-    'HKLM:\SOFTWARE\WOW6432Node\Adobe\Acrobat'
-  )
-  foreach ($root in $paths) {
-    if (Test-Path $root) {
-      Get-ChildItem $root -EA SilentlyContinue | ForEach-Object {
-        foreach ($leaf in 'Installer','CurrentVersion','\DC\Installer','\DC\CurrentVersion') {
-          $k = ($_.PsPath + $leaf)
-          if (Test-Path $k) {
-            try {
-              $p = Get-ItemProperty -Path $k -EA Stop
-              foreach($name in 'ACPVersion','ProductVersion','Version','PV') {
-                $v = $p.$name
-                if ($v -and ($v -match '^\d{1,2}\.\d{3}\.\d{5}$')) { return $v }
-              }
-            } catch {}
-          }
+# ---------------- Environment / winget helpers ----------------
+$WingetMsStoreTlsErr = -1978335138  # 0x8A15005E
+
+function Test-WingetReady {
+    try { $null = Get-Command winget -ErrorAction Stop } catch { return $false }
+    try { winget --version | Out-Null; return $true } catch { return $false }
+}
+function Test-EvergreenReady {
+    try { $m = Get-Module -ListAvailable -Name Evergreen; if ($m) { Import-Module Evergreen -ErrorAction SilentlyContinue | Out-Null; return $true } }
+    catch {}
+    return $false
+}
+function Disable-MsStoreSource {
+    try {
+        $src = winget source list 2>$null
+        if ($src -match '^\s*msstore\s+' -and $src -match 'Enabled') {
+            Write-Host "winget: disabling 'msstore' source for this user..." -ForegroundColor DarkGray
+            winget source disable msstore | Out-Null
         }
-      }
+    } catch {}
+}
+
+# ---------------- App-specific helpers ----------------
+function Get-GitHubDesktopVersion {
+    try {
+        $root = Join-Path $env:LOCALAPPDATA "GitHubDesktop"
+        if (-not (Test-Path $root)) { return $null }
+        $exe = Get-ChildItem -Path $root -Filter "GitHubDesktop.exe" -Recurse -ErrorAction SilentlyContinue |
+               Sort-Object FullName -Descending | Select-Object -First 1
+        if ($exe) { return (Get-Item $exe.FullName).VersionInfo.ProductVersion }
+    } catch {}
+    return $null
+}
+function Get-VSCodeVersion {
+    $paths = @(
+        "$env:LOCALAPPDATA\Programs\Microsoft VS Code\Code.exe",     # user setup
+        "$env:ProgramFiles\Microsoft VS Code\Code.exe",              # system (x64)
+        "${env:ProgramFiles(x86)}\Microsoft VS Code\Code.exe"        # system (x86)
+    )
+    foreach ($p in $paths) {
+        if (Test-Path $p) {
+            try { return (Get-Item $p).VersionInfo.ProductVersion } catch {}
+        }
     }
-  }
-  $targets = @(
-    @{Hive='LocalMachine'; View='Registry64'; Path='SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'},
-    @{Hive='LocalMachine'; View='Registry64'; Path='SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'},
-    @{Hive='LocalMachine'; View='Registry32'; Path='SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'},
-    @{Hive='CurrentUser' ; View='Default'   ; Path='Software\Microsoft\Windows\CurrentVersion\Uninstall'}
-  )
-  foreach($t in $targets){
-    try{
-      $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::$($t.Hive),[Microsoft.Win32.RegistryView]::$($t.View))
-      $key=$base.OpenSubKey($t.Path); if(-not $key){continue}
-      foreach($n in $key.GetSubKeyNames()){
-        try{
-          $s=$key.OpenSubKey($n)
-          $dn=$s.GetValue('DisplayName'); if(-not $dn){continue}
-          if($dn -match '^Adobe\s+Acrobat(?!.*Reader)'){
-            foreach ($prop in 'DisplayVersion','BundleVersion') {
-              $dv=$s.GetValue($prop); if($dv){ return $dv }
+    return $null
+}
+
+# ---------------- Installed version (smart) ----------------
+function Get-InstalledAppVersion {
+    param(
+        [Parameter(Mandatory)][string]$DisplayNameMatch,
+        [string[]]$ExcludePatterns = $null
+    )
+
+    # --- Microsoft Teams (MSIX) — prefer package version (pick newest if many) ---
+    if ($DisplayNameMatch -eq "Microsoft Teams") {
+        $packages = @()
+        foreach ($n in 'MSTeams','MicrosoftTeams') {
+            try { $packages += Get-AppxPackage -AllUsers -Name $n -ErrorAction SilentlyContinue } catch {}
+            try { $packages += Get-AppxPackage          -Name $n -ErrorAction SilentlyContinue } catch {}
+        }
+        $pkg = $packages | Where-Object { $_ } | Sort-Object Version -Descending | Select-Object -First 1
+        if ($pkg) { return $pkg.Version.ToString() }
+        # fall through to registry for legacy Teams
+    }
+
+    # --- Office C2R direct registry read ---
+    if ($DisplayNameMatch -eq "__OFFICE_C2R__") {
+        $key = "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration"
+        if (Test-Path $key) { $v = (Get-ItemProperty $key -ErrorAction SilentlyContinue).VersionToReport; if ($v) { return $v } }
+        return $null
+    }
+
+    # --- VS Code — prefer Code.exe file version ---
+    if ($DisplayNameMatch -eq "Microsoft Visual Studio Code") {
+        $vsver = Get-VSCodeVersion
+        if ($vsver) { return $vsver }
+        # fall through to registry if not found
+    }
+
+    # --- GitHub Desktop — prefer app file version ---
+    if ($DisplayNameMatch -eq "GitHub Desktop") {
+        $gh = Get-GitHubDesktopVersion
+        if ($gh) { return $gh }
+    }
+
+    # --- Generic registry scan (noise filters applied) ---
+    $roots = @(
+        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+    )
+    $nameExcludes = @(
+        'WebView','Runtime','WebView2','Updater','Update','AutoUpdate',
+        'Maintenance','Service','Helper','Crashpad','Stub',
+        'Machine-wide','User Installer','System Installer','Setup'
+    )
+    $candidates = @()
+
+    foreach ($rt in $roots) {
+        if (-not (Test-Path $rt)) { continue }
+        foreach ($sub in Get-ChildItem $rt -ErrorAction SilentlyContinue) {
+            $p = Get-ItemProperty $sub.PSPath -ErrorAction SilentlyContinue
+            $dn = $p.DisplayName; if (-not $dn) { continue }
+            if ($dn -notlike "*$DisplayNameMatch*") { continue }
+
+            $skip = $false
+            foreach ($ex in $nameExcludes) { if ($dn -match [regex]::Escape($ex)) { $skip=$true; break } }
+            if ($skip) { continue }
+            if ($ExcludePatterns) { foreach ($ex in $ExcludePatterns) { if ($dn -match [regex]::Escape($ex)) { $skip=$true; break } } }
+            if ($skip) { continue }
+
+            $dv = $p.DisplayVersion
+            $score = if ($dn -ieq $DisplayNameMatch) {3} elseif ($dn -ilike "$DisplayNameMatch*") {2} else {1}
+            $vObj = $null; if ($dv) { try { $vObj = [version]($dv -replace '[^\d\.]','') } catch {} }
+            $candidates += [pscustomobject]@{ DisplayName=$dn; DisplayVersion=$dv; Score=$score; VersionObj=$vObj; KeyPath=$sub.PSPath }
+        }
+    }
+    if ($candidates.Count -eq 0) { return $null }
+    ($candidates | Sort-Object @{e="Score";Descending=$true}, @{e="VersionObj";Descending=$true} | Select-Object -First 1).DisplayVersion
+}
+
+# ---------------- Latest version (forces winget source) ----------------
+function Get-LatestWingetVersion {
+    param([Parameter(Mandatory)][string]$WingetId)
+    $out = winget search --id $WingetId --exact --source winget --accept-source-agreements 2>$null
+    if ($out) {
+        $line = ($out -split "`r?`n" | Where-Object { $_ -match [regex]::Escape($WingetId) -and $_ -match "\|" } | Select-Object -First 1)
+        if ($line) { $parts = $line -split "\|"; if ($parts.Count -ge 3) { return $parts[2].Trim() } }
+    }
+    $out2 = winget show --id $WingetId --exact --source winget --accept-source-agreements 2>$null
+    if ($out2) {
+        $verLine = ($out2 -split "`r?`n") | Where-Object { $_ -match "^\s*Version\s*:" } | Select-Object -First 1
+        if ($verLine) { return ($verLine -split ":\s*",2)[1].Trim() }
+    }
+    return $null
+}
+function Get-LatestEvergreenVersion {
+    param([Parameter(Mandatory)][string]$EvergreenName)
+    try {
+        $data = Get-EvergreenApp -Name $EvergreenName -ErrorAction Stop
+        if (-not $data) { return $null }
+        if ($null -ne ($data | Get-Member -Name Channel -ErrorAction SilentlyContinue)) {
+            $stable = $data | Where-Object { $_.Channel -match 'Stable' }
+            if ($stable) { $data = $stable }
+        }
+        $data | Where-Object { $_.Version } |
+            Sort-Object { try {[version]($_.Version -replace '[^\d\.]','')} catch { $_.Version } } -Descending |
+            Select-Object -First 1 -ExpandProperty Version
+    } catch { return $null }
+}
+
+# ---------------- Version compare ----------------
+function Compare-VersionSmart {
+    param([string]$Installed,[string]$Latest)
+    if (-not $Installed -or -not $Latest) { return $null }
+    try {
+        $v1 = [version]($Installed -replace '[^\d\.]','')
+        $v2 = [version]($Latest    -replace '[^\d\.]','')
+        [Math]::Sign($v1.CompareTo($v2))
+    } catch { if ($Installed -eq $Latest) {0} else {-1} }
+}
+
+# ---------------- Windows Update row ----------------
+function Get-WindowsUpdateStatus {
+    try {
+        $session = New-Object -ComObject Microsoft.Update.Session
+        $searcher = $session.CreateUpdateSearcher()
+        $result = $searcher.Search("IsInstalled=0 and IsHidden=0 and Type='Software'")
+        $pending = $result.Updates.Count
+    } catch { $pending = $null }
+
+    $os = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+    $installedTxt = "$($os.DisplayVersion) (Build $($os.CurrentBuild).$($os.UBR))"
+
+    if ($pending -gt 0) { [PSCustomObject]@{ Installed=$installedTxt; Latest="Updates available ($pending)"; Status="Update available"; UpgradeTo="Apply Windows Updates" } }
+    elseif ($pending -eq 0) { [PSCustomObject]@{ Installed=$installedTxt; Latest="-"; Status="Up-to-date"; UpgradeTo="-" } }
+    else { [PSCustomObject]@{ Installed=$installedTxt; Latest="-"; Status="Unknown (WU query failed)"; UpgradeTo="-" } }
+}
+
+# ---------------- Evergreen download/install ----------------
+$EvergreenSilentArgs = @{
+  "MicrosoftVisualStudioCode" = "/VERYSILENT /NORESTART"
+  "MicrosoftPowerBIDesktop"   = "/quiet ACCEPT_EULA=1"
+}
+function Get-EvergreenAsset {
+    param([Parameter(Mandatory)][string]$EvergreenName)
+    try {
+        $data = Get-EvergreenApp -Name $EvergreenName -ErrorAction Stop
+        if (-not $data) { return $null }
+        if ($null -ne ($data | Get-Member -Name Channel -ErrorAction SilentlyContinue)) {
+            $data = $data | Where-Object { $_.Channel -match 'Stable' -or -not $_.Channel }
+        }
+        $arch = if ([Environment]::Is64BitOperatingSystem) {"x64|amd64"} else {"x86|i386"}
+        if ($null -ne ($data | Get-Member -Name Architecture -ErrorAction SilentlyContinue)) {
+            $c = $data | Where-Object { $_.Architecture -match $arch }; if ($c) { $data = $c }
+        }
+        $msi = $data | Where-Object { $_.Uri -match '\.msi($|\?)' } | Select-Object -First 1
+        if ($msi) { return $msi }
+        $exe = $data | Where-Object { $_.Uri -match '\.exe($|\?)' } | Select-Object -First 1
+        if ($exe) { return $exe }
+    } catch {}
+    return $null
+}
+function Install-AppEvergreen {
+    param(
+      [Parameter(Mandatory)][string]$EvergreenName,
+      [Parameter(Mandatory)][string]$AppDisplayName,
+      [switch]$WhatIf
+    )
+    $asset = Get-EvergreenAsset -EvergreenName $EvergreenName
+    if (-not $asset -or -not $asset.Uri) { return [pscustomobject]@{ Used="Evergreen"; Result="NoAsset"; ExitCode=-1 } }
+    $uri  = $asset.Uri
+    $file = Join-Path $DownloadDir ([IO.Path]::GetFileName((($uri -split '\?')[0])))
+
+    Write-Host "${AppDisplayName}: downloading from $uri" -ForegroundColor DarkCyan
+    if ($WhatIf) {
+        Write-Host "WhatIf: would download to $file" -ForegroundColor Gray
+    } else {
+        try {
+            try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+            Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile $file -ErrorAction Stop
+        } catch {
+            Write-Warning "${AppDisplayName}: download failed: $($_.Exception.Message)"
+            return [pscustomobject]@{ Used="Evergreen"; Result="DownloadFailed"; ExitCode=-1 }
+        }
+    }
+
+    $ext = [IO.Path]::GetExtension($file).ToLowerInvariant()
+    if ($ext -eq ".msi") {
+        $args = "/i `"$file`" /qn /norestart"
+        if ($WhatIf) { Write-Host "WhatIf: msiexec $args" -ForegroundColor Gray; return [pscustomobject]@{ Used="Evergreen"; Result="WouldRun"; ExitCode=0 } }
+        $p = Start-Process msiexec -ArgumentList $args -Wait -PassThru -NoNewWindow
+        return [pscustomobject]@{ Used="Evergreen"; Result="RanMSI"; ExitCode=$p.ExitCode }
+    } elseif ($ext -eq ".exe") {
+        $exeArgs = $null
+        if ($EvergreenSilentArgs.ContainsKey($EvergreenName)) {
+            $exeArgs = "$($EvergreenSilentArgs[$EvergreenName])"
+        } else {
+            Write-Host "${AppDisplayName}: unknown silent args for Evergreen EXE; will fall back to winget." -ForegroundColor Yellow
+            return [pscustomobject]@{ Used="Evergreen"; Result="UnknownExeArgs"; ExitCode=-1; File=$file }
+        }
+        if ($WhatIf) { Write-Host "WhatIf: `"$file`" $exeArgs" -ForegroundColor Gray; return [pscustomobject]@{ Used="Evergreen"; Result="WouldRun"; ExitCode=0 } }
+        $p = Start-Process -FilePath $file -ArgumentList $exeArgs -Wait -PassThru -NoNewWindow
+        return [pscustomobject]@{ Used="Evergreen"; Result="RanEXE"; ExitCode=$p.ExitCode }
+    } else { [pscustomobject]@{ Used="Evergreen"; Result="UnsupportedType"; ExitCode=-1 } }
+}
+
+# --------- Office & Teams helpers ---------
+function Update-OfficeC2R {
+    param([switch]$WhatIf)
+    $c2r = Join-Path "$env:ProgramFiles\Common Files\Microsoft Shared\ClickToRun" "OfficeC2RClient.exe"
+    if (-not (Test-Path $c2r)) { return [pscustomobject]@{ Found=$false; ExitCode=-1; Result="C2R client not found" } }
+    $args = "/update user displaylevel=false forceappshutdown=true"
+    if ($WhatIf) { Write-Host "WhatIf: `"$c2r`" $args" -ForegroundColor Gray; return [pscustomobject]@{ Found=$true; ExitCode=0; Result="WouldRun" } }
+    Write-Host "Microsoft Office 365: running OfficeC2RClient update..." -ForegroundColor Cyan
+    $p = Start-Process -FilePath $c2r -ArgumentList $args -NoNewWindow -PassThru -Wait
+    [pscustomobject]@{ Found=$true; ExitCode=$p.ExitCode; Result=$(if ($p.ExitCode -eq 0) { "Success" } else { "ExitCode $($p.ExitCode)" }) }
+}
+function Stop-TeamsIfRunning {
+    $names = @("ms-teams","ms-teams-updater","Teams","MSTeams")
+    foreach ($n in $names) {
+        Get-Process -Name $n -ErrorAction SilentlyContinue | ForEach-Object {
+            try { Stop-Process -Id $_.Id -Force -ErrorAction Stop } catch {}
+        }
+    }
+}
+
+# ---------------- Upgrades WITH PROGRESS ----------------
+function Invoke-AppUpgrades {
+    param(
+        [Parameter(Mandatory)][array]$Results,
+        [Parameter(Mandatory)][array]$AppConfig,
+        [switch]$IncludeWindowsUpdate,
+        [switch]$WhatIf,
+        [switch]$WindowsOnly
+    )
+
+    Add-Content -Path $LogPath -Value "`n==== $(Get-Date) ===="
+
+    if ($DisableMsStore -and (Test-WingetReady)) { Disable-MsStoreSource }
+
+    if ($IncludeWindowsUpdate) {
+        $wu = $Results | Where-Object Application -eq "Windows Updates"
+        if ($wu -and $wu.Status -eq "Update available") {
+            Write-Progress -Activity "Windows Update" -Status "Installing available updates..." -PercentComplete 0
+            try {
+                if (Get-Module -ListAvailable -Name PSWindowsUpdate) {
+                    Import-Module PSWindowsUpdate -ErrorAction SilentlyContinue | Out-Null
+                    if ($WhatIf) { Write-Host "WhatIf: Get-WindowsUpdate -AcceptAll -Install -AutoReboot:`$false" -ForegroundColor Gray }
+                    else { Get-WindowsUpdate -AcceptAll -Install -AutoReboot:$false | Tee-Object -FilePath $LogPath -Append | Out-Null }
+                } else { Write-Warning "PSWindowsUpdate not installed; skipping OS updates." }
+            } catch { Write-Warning "Windows Update install failed: $($_.Exception.Message)" }
+            Write-Progress -Activity "Windows Update" -Completed
+        } else { Write-Host "Windows Update: no pending updates detected." -ForegroundColor DarkGray }
+        if ($WindowsOnly) { Write-Host "Windows Update-only run: skipping application upgrades." -ForegroundColor DarkGray; return }
+    }
+
+    $queue = @($Results | Where-Object { $_.Application -ne "Windows Updates" -and $_.Status -eq "Update available" })
+    $total = $queue.Count
+    if ($total -eq 0) { Write-Host "No application upgrades required." -ForegroundColor Green; return }
+
+    Write-Host ("Upgrading {0} application(s)..." -f $total) -ForegroundColor Cyan
+    $i = 0; $actions = @()
+
+    foreach ($r in $queue) {
+        $i++
+        $cfg = $AppConfig | Where-Object { $_.Name -eq $r.Application } | Select-Object -First 1
+        if (-not $cfg) { continue }
+        $label = "[{0}/{1}] {2}" -f $i,$total,$cfg.Name
+        $den = [Math]::Max(1, $total)
+        $pct = [int]([Math]::Max(0, [Math]::Min(100, ((($i - 1) * 100.0) / $den)) ))
+
+        Write-Progress -Activity "Upgrading applications" -Status ("{0} — preparing" -f $label) -PercentComplete $pct
+        $fromVer = $r.Installed; $method="-"; $exit=$null; $result="Skipped"
+
+        if ($cfg.Name -eq "Microsoft Office 365") {
+            $office = Update-OfficeC2R -WhatIf:$WhatIf
+            $method = "OfficeC2R"; $exit = $office.ExitCode; $result = $office.Result
+            Add-Content -Path $LogPath -Value ("Office 365: OfficeC2R {0}, exit {1}" -f $result,$exit)
+        }
+        else {
+            $evergreenOk = (Get-Module -Name Evergreen -ListAvailable) -ne $null
+            if ($cfg.LatestProvider -eq 'Evergreen' -and $cfg.EvergreenName -and $evergreenOk) {
+                Write-Host ("{0}: Evergreen -> download/install..." -f $cfg.Name) -ForegroundColor Cyan
+                Write-Progress -Activity "Upgrading applications" -Status ("{0} — downloading (Evergreen)" -f $label) -PercentComplete $pct
+                $ev = Install-AppEvergreen -EvergreenName $cfg.EvergreenName -AppDisplayName $cfg.Name -WhatIf:$WhatIf
+                if ($ev.Result -in @("RanMSI","RanEXE","WouldRun")) {
+                    $method="Evergreen"; $exit=$ev.ExitCode
+                    $result = if ($WhatIf) {"Simulated"} else { if ($exit -eq 0) {"Success"} else {"ExitCode $exit"} }
+                    Add-Content -Path $LogPath -Value ("{0}: Evergreen {1} exit {2}" -f $cfg.Name,$ev.Result,$ev.ExitCode)
+                }
             }
-          }
-        }catch{}
-      }
-    }catch{}
-  }
-  $exe = Get-ChildItem "$env:ProgramFiles\Adobe","${env:ProgramFiles(x86)}\Adobe" -Recurse -Filter Acrobat.exe -EA SilentlyContinue | Select-Object -ExpandProperty FullName
-  foreach($p in $exe){
-    try{
-      $fv = (Get-Item $p).VersionInfo.FileVersion
-      if ($fv -and ($fv -match '^\d{1,2}\.\d{3}\.\d{5}$')) { return $fv }
-    }catch{}
-  }
-  return $null
-}
-function Get-LatestFromAdobeAcrobatFull {
-  try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
-  try {
-    $v=(Invoke-RestMethod 'https://armmf.adobe.com/arm-manifests/win/AcrobatDC/acrobat/acrobat/current_version.txt' -UseBasicParsing -TimeoutSec 20).Trim()
-    if ($v -match '^\d{1,2}\.\d{3}\.\d{5}$'){return $v}; $null
-  } catch { $null }
+
+            if ($cfg.Name -eq "Microsoft Teams" -and -not $WhatIf) { Stop-TeamsIfRunning }
+
+            if ($method -eq "-" -and $cfg.WingetId -and (Test-WingetReady)) {
+                Write-Host ("{0}: winget -> upgrade..." -f $cfg.Name) -ForegroundColor Cyan
+                Write-Progress -Activity "Upgrading applications" -Status ("{0} — running winget" -f $label) -PercentComplete $pct
+
+                $args = @("upgrade","--id",$cfg.WingetId,"--exact","--source","winget",
+                          "--accept-package-agreements","--accept-source-agreements","--silent")
+                if ($WhatIf) {
+                    Write-Host ("WhatIf: winget {0}" -f ($args -join ' ')) -ForegroundColor Gray
+                    Add-Content -Path $LogPath -Value ("WhatIf: winget {0}" -f ($args -join ' '))
+                    $method="winget"; $exit=0; $result="Simulated"
+                } else {
+                    try {
+                        $proc = Start-Process -FilePath "winget" -ArgumentList $args -NoNewWindow -PassThru -Wait
+                        $method="winget"; $exit=$proc.ExitCode
+                        if     ($proc.ExitCode -eq 0)                   { $result = "Success" }
+                        elseif ($proc.ExitCode -eq $WingetMsStoreTlsErr) { $result = "Source error (msstore/TLS). Use -DisableMsStore or fix proxy certs." }
+                        else { $result = "ExitCode $($proc.ExitCode)" }
+
+                        if ($cfg.Name -eq "Microsoft Teams" -and $proc.ExitCode -ne 0) {
+                            Write-Host "Microsoft Teams: retry with 'winget install --force'..." -ForegroundColor DarkYellow
+                            $args2 = @("install","--id",$cfg.WingetId,"--exact","--source","winget",
+                                       "--accept-package-agreements","--accept-source-agreements","--silent","--force")
+                            $proc2 = Start-Process -FilePath "winget" -ArgumentList $args2 -NoNewWindow -PassThru -Wait
+                            if ($proc2.ExitCode -eq 0) { $result = "Success (repair/install)"; $exit=0; $method="winget-install" }
+                            Add-Content -Path $LogPath -Value ("Teams install --force exit {0}" -f $proc2.ExitCode)
+                        }
+
+                        Add-Content -Path $LogPath -Value ("{0}: winget exitcode {1}" -f $cfg.Name,$proc.ExitCode)
+                    } catch {
+                        $method="winget"; $exit=-1; $result="Error"
+                        Write-Warning ("{0}: winget failed — {1}" -f $cfg.Name,$_.Exception.Message)
+                        Add-Content -Path $LogPath -Value ("{0}: winget error {1}" -f $cfg.Name,$_.Exception.Message)
+                    }
+                }
+            } elseif ($method -eq "-" -and -not $cfg.WingetId) {
+                Write-Warning ("{0}: no Evergreen path and no WingetId — cannot upgrade." -f $cfg.Name); $result="No installer path"
+            }
+        }
+
+        Write-Progress -Activity "Upgrading applications" -Status ("{0} — verifying" -f $label) -PercentComplete $pct
+        $toVer = $fromVer
+        if (-not $WhatIf) {
+            $exclude = $null; if ($cfg.Name -eq "Adobe Acrobat (full)") { $exclude=@('Reader') }
+            $toVer = Get-InstalledAppVersion -DisplayNameMatch $cfg.LocalMatch -ExcludePatterns $exclude
+        }
+
+        if ($result -eq "Success" -and $toVer -and $toVer -ne $fromVer) {
+            Write-Host ("{0}: upgraded {1} -> {2} via {3}" -f $cfg.Name,$fromVer,$toVer,$method) -ForegroundColor Green
+        } elseif ($result -like "Success (repair/install)*") {
+            Write-Host ("{0}: repaired/installed to {1} via {2}" -f $cfg.Name,$toVer,$method) -ForegroundColor Green
+        } elseif ($result -eq "Simulated") {
+            Write-Host ("{0}: would upgrade {1} -> {2} via {3}" -f $cfg.Name,$fromVer,$r.UpgradeTo,$method) -ForegroundColor Yellow
+        } else {
+            Write-Host ("{0}: {1} (method: {2}, from: {3}, to: {4})" -f $cfg.Name,$result,$method,$fromVer,$toVer) -ForegroundColor DarkYellow
+        }
+
+        $actions += [pscustomobject]@{
+            Application=$cfg.Name; Method=$method; From=$fromVer; To=$toVer;
+            Result=$result; ExitCode=$(if ($exit -ne $null) { $exit } else { "-" })
+        }
+    }
+
+    Write-Progress -Activity "Upgrading applications" -Completed
+    Write-Host "`nUpgrade summary:" -ForegroundColor White
+    $actions | Format-Table Application,Method,From,To,Result,ExitCode -AutoSize
+    foreach ($a in $actions) { Add-Content -Path $LogPath -Value ("{0}: {1} via {2} ({3} -> {4}) exit {5}" -f $a.Application,$a.Result,$a.Method,$a.From,$a.To,$a.ExitCode) }
+    Write-Host "Action log: $LogPath"
 }
 
-function Get-LatestFromEvergreen {
-  param([string]$EvergreenName,[string]$PreferredChannel)
-  try {
-    $data = Get-EvergreenApp -Name $EvergreenName -ErrorAction Stop
-    if ($PreferredChannel -and ($data | Get-Member -Name Channel -EA SilentlyContinue)) {
-      $pref = $data | Where-Object { $_.Channel -match $PreferredChannel }
-      if ($pref) { $data = $pref }
+# -------------- Build results --------------
+function Get-AppResults {
+    param([Parameter(Mandatory)][array]$Apps)
+    $wingetOk = Test-WingetReady; $evergreenOk = Test-EvergreenReady
+
+    if ($wingetOk -and $DisableMsStore) { Disable-MsStoreSource }
+    if (-not $wingetOk)    { Write-Warning "winget not found/working. Winget lookups/installs will be skipped." }
+    if (-not $evergreenOk) { Write-Warning "Evergreen module not available. Evergreen lookups/installs will be skipped." }
+
+    $out = foreach ($app in $Apps) {
+        if ($app.LocalMatch -eq "__WINDOWS_UPDATE__") {
+            $wu = Get-WindowsUpdateStatus
+            [PSCustomObject]@{
+                Application=$app.Name
+                Installed =$wu.Installed
+                Latest    =$wu.Latest
+                Status    =$wu.Status
+                UpgradeTo =$wu.UpgradeTo
+                WingetId  ="-"
+            }
+            continue
+        }
+        $exclude = $null; if ($app.Name -eq "Adobe Acrobat (full)") { $exclude=@('Reader') }
+        $installed = Get-InstalledAppVersion -DisplayNameMatch $app.LocalMatch -ExcludePatterns $exclude
+        if (-not $installed) {
+            [PSCustomObject]@{
+                Application=$app.Name
+                Installed ="-"
+                Latest    ="-"
+                Status    ="Application not installed"
+                UpgradeTo ="-"
+                WingetId  =$(if ($app.WingetId) { $app.WingetId } else { "-" })
+            }
+            continue
+        }
+
+        $latest = $null
+        if ($app.LatestProvider -eq 'Evergreen' -and $evergreenOk -and $app.EvergreenName) { $latest = Get-LatestEvergreenVersion -EvergreenName $app.EvergreenName }
+        if (-not $latest -and $wingetOk -and $app.WingetId) { $latest = Get-LatestWingetVersion -WingetId $app.WingetId }
+
+        $cmp = Compare-VersionSmart -Installed $installed -Latest $latest
+        if (-not $latest) { $status = "Unknown (no latest info)" }
+        elseif ($cmp -lt 0) { $status = "Update available" }
+        elseif ($cmp -eq 0) { $status = "Up-to-date" }
+        else { $status = "Ahead of catalog" }
+
+        [PSCustomObject]@{
+            Application = $app.Name
+            Installed   = $installed
+            Latest      = $(if ($latest) { $latest } else { "-" })
+            Status      = $status
+            UpgradeTo   = $(if ($status -eq "Update available" -and $latest) { $latest } else { "-" })
+            WingetId    = $(if ($app.WingetId) { $app.WingetId } else { "-" })
+        }
     }
-    if ($data -and ($data | Get-Member -Name Channel -EA SilentlyContinue)) {
-      $stable = $data | Where-Object { $_.Channel -match 'Stable' }
-      if ($stable) { $data = $stable }
-    }
-    $top = $data | Where-Object { $_.Version } |
-           Sort-Object { try{ [version]($_.Version -replace '[^\d\.]','') }catch{ $_.Version } } -Descending |
-           Select-Object -First 1
-    if ($top) { [pscustomobject]@{ Version = $top.Version } }
-  } catch { $null }
-}
-function Get-LatestFromWinget {
-  param([string]$WingetId)
-  try{
-    $out = winget show --id $WingetId --exact --source winget --accept-source-agreements 2>$null
-    if($out){
-      $verLine = ($out -split "`r?`n") | Where-Object { $_ -match "^\s*Version\s*:" } | Select-Object -First 1
-      $ver = if($verLine){ ($verLine -split ":\s*",2)[1].Trim() } else { $null }
-      [pscustomobject]@{ Version=$ver }
-    }
-  }catch{}
-}
-function Compare-VersionSmart { param([string]$Installed,[string]$Latest)
-  if(-not $Installed -or -not $Latest){ return $null }
-  try{ $v1=[version]($Installed -replace '[^\d\.]',''); $v2=[version]($Latest -replace '[^\d\.]',''); [Math]::Sign($v1.CompareTo($v2)) }
-  catch{ if($Installed -eq $Latest){0}else{-1} }
-}
-function Get-RecentOSUpdates {
-  try {
-    Get-HotFix | Sort-Object InstalledOn -Descending | ForEach-Object {
-      [pscustomobject]@{
-        Computer    = $env:COMPUTERNAME
-        KB          = $_.HotFixID
-        Description = $_.Description
-        InstalledOn = $(if ($_.InstalledOn) { [datetime]$_.InstalledOn } else { $null })
-      }
-    }
-  } catch { @() }
+    $out | Sort-Object Application
 }
 
-# ---------------------- Paths & dates ----------------------
-$monthFolder = Join-Path $ShareRoot $Period
-if (-not (Test-Path $monthFolder)) { New-Item -ItemType Directory -Path $monthFolder -Force | Out-Null }
-$today     = Get-Date
-$todayIso  = $today.ToString('yyyy-MM-dd')
-$todayUK   = $today.ToString('dd/MM/yy')
-
-# ---------------------- Combined AVD HTML ----------------------
-function New-CombinedHtml {
-  param(
-    [array]$AppData,
-    [array]$OsData,
-    [hashtable]$OsInfoMap,      # NEW: machine -> OS info
-    [string]$Title,
-    [string]$OutPath,
-    [array]$Map,
-    [string]$Period
-  )
-
-  $css = @"
+# -------------- HTML writer --------------
+function Write-ReportHtml {
+    param([Parameter(Mandatory)][array]$Results)
+    $css = @"
 <style>
 body { font-family: Segoe UI, Arial, sans-serif; margin: 24px; }
-h1 { margin: 0 0 16px 0; }
-h3 { margin: 6px 0 12px 0; color:#374151; }
-.panel { border:1px solid #e0e0e0; border-radius:10px; padding:16px; margin:18px 0; }
-.tag  { display:inline-block; background:#e5e7eb; color:#111827; padding:2px 10px; border-radius:999px; font-size:12px; margin-left:8px; }
-.small { color:#6b7280; font-size:12px; margin-top: 16px; }
-table { border-collapse: collapse; width: 100%; margin-bottom: 18px; }
-th,td { border: 1px solid #ddd; padding: 8px; text-align: left; background:#ffffff; }
-th { background: #f3f3f3; }
-.ok   { color:#2e7d32; font-weight:600; }
-.bad  { color:#c62828; font-weight:600; }
-.info { color:#1d4ed8; font-weight:600; }
-.os-in-month { color:#2e7d32; font-weight:600; }
-.headerline { font-size:18px; font-weight:700; }
-ul { margin: 6px 0 12px 18px; }
-.warn { color:#c62828; }
+h1 { font-size: 20px; margin-bottom: 12px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+th { background: #f6f6f6; }
+tr.status-uptodate { background: #e8f5e9; }
+tr.status-update   { background: #ffebee; }
+tr.status-missing  { background: #eceff1; }
+tr.status-unknown  { background: #f3e5f5; }
+.badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+.badge-ok      { background: #2e7d32; color: white; }
+.badge-update  { background: #c62828; color: white; }
+.badge-missing { background: #607d8b; color: white; }
+.badge-unknown { background: #6a1b9a; color: white; }
+.small { color: #666; font-size: 12px; }
 </style>
 "@
-
-  $repMonth    = [datetime]::ParseExact($Period,'MMMM yyyy',$null)
-  $monthStart  = Get-Date -Year $repMonth.Year -Month $repMonth.Month -Day 1 -Hour 0 -Minute 0 -Second 0
-  $monthEnd    = $monthStart.AddMonths(1)
-
-  $computers = ($AppData.Computer + $OsData.Computer | Where-Object { $_ } | Select-Object -Unique | Sort-Object)
-
-  $allMasters = ($Map | Select-Object -ExpandProperty Master -Unique | Sort-Object)
-  $presentMasters = $computers | Where-Object { $allMasters -contains $_ } | Sort-Object
-  $missingMasters = $allMasters | Where-Object { $presentMasters -notcontains $_ } | Sort-Object
-  $countLine = "Master image count: {0} of {1}" -f ($presentMasters.Count), ($allMasters.Count)
-  $missingLine = if ($missingMasters.Count -gt 0) { "Please run the report script on: " + ($missingMasters -join ', ') } else { "" }
-
-  $headerBlock = @"
-<div class='panel'>
-  <div class='headerline'>$countLine</div>
-  $(if($missingLine){ "<div class='warn'>$missingLine</div>" } else { "" })
-</div>
-"@
-
-  $sections = foreach ($comp in $computers) {
-    $apps = $AppData | Where-Object { $_.Computer -eq $comp -and $_.Status -ne 'Application not installed' } | Sort-Object Application
-
-    $osMonth = $OsData | Where-Object {
-      $_.Computer -eq $comp -and $_.InstalledOn -ge $monthStart -and $_.InstalledOn -lt $monthEnd
-    } | Sort-Object InstalledOn -Descending
-
-    $osPrev3 = $OsData | Where-Object {
-      $_.Computer -eq $comp -and $_.InstalledOn -lt $monthStart
-    } | Sort-Object InstalledOn -Descending | Select-Object -First 3
-
-    $rows = $Map | Where-Object { $_.Master -ieq $comp }
-    $envs = ($rows.Environment | ForEach-Object { "$_".Trim() } | Select-Object -Unique) -join ', '
-    if (-not $envs) { $envs = "-" }
-
-    # OS tag
-    $osTag = ''
-    if ($OsInfoMap.ContainsKey($comp)) {
-      $oi = $OsInfoMap[$comp]
-      $osTag = "OS: $($oi.OSName) $($oi.OSVersion) (Build $($oi.OSBuild))"
+    $rows = foreach ($r in $Results) {
+        $class="status-unknown"; $badgeClass="badge-unknown"
+        switch -Regex ($r.Status) {
+            "Up-to-date"               { $class="status-uptodate"; $badgeClass="badge-ok"; break }
+            "Update available"         { $class="status-update";   $badgeClass="badge-update"; break }
+            "Application not installed"{ $class="status-missing";  $badgeClass="badge-missing"; break }
+            default                    { $class="status-unknown";  $badgeClass="badge-unknown" }
+        }
+        "<tr class='$class'><td>$($r.Application)</td><td>$($r.Installed)</td><td>$($r.Latest)</td><td><span class='badge $badgeClass'>$($r.Status)</span></td><td>$($r.UpgradeTo)</td><td class='small'>$($r.WingetId)</td></tr>"
     }
-
-    $fmt = 'dd/MM/yyyy'
-    $osRowsMonth = if ($osMonth -and $osMonth.Count -gt 0) {
-      foreach ($o in $osMonth) {
-        $d = if ($o.InstalledOn) { $o.InstalledOn.ToString($fmt) } else { '-' }
-        "<tr><td class='os-in-month'>$($o.KB)</td><td class='os-in-month'>$($o.Description)</td><td class='os-in-month'>$d</td></tr>"
-      }
-    } else { @("<tr><td colspan='3'><em>No OS updates were installed in $Period.</em></td></tr>") }
-
-    $osRowsPrev3 = if ($osPrev3 -and $osPrev3.Count -gt 0) {
-      foreach ($o in $osPrev3) {
-        $d = if ($o.InstalledOn) { $o.InstalledOn.ToString($fmt) } else { '-' }
-        "<tr><td>$($o.KB)</td><td>$($o.Description)</td><td>$d</td></tr>"
-      }
-    } else { @("<tr><td colspan='3'><em>No updates prior to this month were found.</em></td></tr>") }
-
-    $appRows = foreach ($a in $apps) {
-      $rowCls = $a.Css
-      $latestCls = if ($a.LatestCss) { $a.LatestCss } else { $rowCls }
-      "<tr><td class='$rowCls'>$($a.Application)</td><td class='$rowCls'>$($a.Installed)</td><td class='$latestCls'>$($a.Latest)</td><td class='$rowCls'>$($a.Status)</td></tr>"
-    }
-
-@"
-<div class='panel'>
-  <div class='headerline'>$comp
-    <span class='tag'>Environment: $envs</span>
-    $(if($osTag){ "<span class='tag'>$osTag</span>" } )
-  </div>
-
-  <h3>Applications</h3>
-  <table>
-    <thead><tr><th>Application</th><th>Installed</th><th>Latest</th><th>Status</th></tr></thead>
-    <tbody>
-      $(($appRows -join "`n"))
-    </tbody>
-  </table>
-
-  <h3>OS updates applied in $Period</h3>
-  <table>
-    <thead><tr><th>KB</th><th>Description</th><th>Installed On</th></tr></thead>
-    <tbody>
-      $(($osRowsMonth -join "`n"))
-    </tbody>
-  </table>
-
-  <h3>OS updates - recent 3 (excluding this month)</h3>
-  <table>
-    <thead><tr><th>KB</th><th>Description</th><th>Installed On</th></tr></thead>
-    <tbody>
-      $(($osRowsPrev3 -join "`n"))
-    </tbody>
-  </table>
-</div>
-"@
-  }
-
-  $html = @"
+    $html = @"
 <html>
-<head><meta charset='utf-8'><title>$Title</title>$css</head>
+<head><meta charset='utf-8'><title>AVD App Update Report</title>$css</head>
 <body>
-<h1>$Title</h1>
-$headerBlock
-$(($sections -join "`n"))
-<p class='small'>Apps: green = latest installed; red = update available. If Evergreen Stable exists we use it; otherwise winget. If winget is newer than Evergreen, the <em>Latest</em> cell shows that version in <span class='info'>blue</span> with "waiting on Evergreen release".</p>
-<p class='small'>OS: dates shown as DD/MM/YYYY. We show updates applied <strong>this month</strong> (green) and the <strong>previous 3 updates</strong> excluding this month.</p>
+<h1>AVD App Update Report</h1>
+<table>
+<thead><tr><th>Application</th><th>Installed Version</th><th>Latest Version</th><th>Status</th><th>Upgrade To</th><th>Winget ID</th></tr></thead>
+<tbody>
+$(($rows -join "`n"))
+</tbody>
+</table>
 <p class='small'>Generated: $(Get-Date)</p>
 </body>
 </html>
 "@
-  $html | Set-Content -Path $OutPath -Encoding UTF8
-  return $OutPath
+    $html | Set-Content -Path $ReportPath -Encoding UTF8
+    Write-Host "HTML report saved to: $ReportPath"
+    try { if ($env:USERNAME -ne "SYSTEM") { Start-Process -FilePath $ReportPath -ErrorAction Stop } } catch { Write-Host "Could not auto-open the report: $($_.Exception.Message)" -ForegroundColor DarkGray }
 }
 
-# ---------------------- PDF (optional) ----------------------
-function Convert-HtmlToPdf {
-  param([string]$HtmlPath,[string]$PdfPath)
-  $edge = @("$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe","${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-  if ($edge) {
-    foreach ($flags in @(
-      @("--headless","--disable-gpu","--print-to-pdf=`"$PdfPath`"","`"$HtmlPath`""),
-      @("--headless=new","--disable-gpu","--print-to-pdf=`"$PdfPath`"","`"$HtmlPath`"")
-    )) { Start-Process -FilePath $edge -ArgumentList $flags -PassThru -Wait -NoNewWindow | Out-Null; if (Test-Path $PdfPath) { return $true } }
-  }
-  $chrome = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe","${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-  if ($chrome) { Start-Process -FilePath $chrome -ArgumentList @("--headless=new","--disable-gpu","--print-to-pdf=`"$PdfPath`"","`"$HtmlPath`"") -PassThru -Wait -NoNewWindow | Out-Null; if (Test-Path $PdfPath) { return $true } }
-  $wk = @("C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe","C:\Program Files (x86)\wkhtmltopdf\bin\wkhtmltopdf.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-  if ($wk) { Start-Process -FilePath $wk -ArgumentList "`"$HtmlPath`" `"$PdfPath`"" -PassThru -Wait -NoNewWindow | Out-Null; if (Test-Path $PdfPath) { return $true } }
-  Write-Warning "PDF step skipped (Edge/Chrome/wkhtmltopdf not found)."; return $false
+# ----------------- MAIN -----------------
+$results = Get-AppResults -Apps $AppsToCheck
+
+# Console output
+$fmt = "{0,-28} {1,-20} {2,-20} {3,-24} {4,-14}"
+Write-Host ""; Write-Host ($fmt -f "Application","Installed","Latest","Status","Upgrade To")
+Write-Host ("-" * 110)
+foreach ($r in $results) {
+    $fg = "Gray"
+    if     ($r.Status -eq "Up-to-date")                { $fg = "Green" }
+    elseif ($r.Status -eq "Update available")          { $fg = "Red" }
+    elseif ($r.Status -eq "Application not installed") { $fg = "DarkGray" }
+    elseif ($r.Status -like "Unknown*")                { $fg = "Yellow" }
+    Write-Host ($fmt -f $r.Application,$r.Installed,$r.Latest,$r.Status,$r.UpgradeTo) -ForegroundColor $fg
 }
 
-# ---------------------- Robust CSV import ----------------------
-function Import-CsvRobust {
-  param([string]$Path,[int]$Retries=5,[int]$DelayMs=500)
-  for ($i=1; $i -le $Retries; $i++) {
-    try { return (Import-Csv -Path $Path -ErrorAction Stop) }
-    catch { if ($i -eq $Retries){ Write-Warning "Failed to read '$Path': $($_.Exception.Message)"; return @() } ; Start-Sleep -Milliseconds $DelayMs }
-  }
+# CSV (respect -NoCsv)
+if (-not $NoCsv) {
+    $results | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $CsvPath
+    Write-Host "`nCSV saved to: $CsvPath"
+} else {
+    Write-Host "Skipping CSV output." -ForegroundColor DarkGray
 }
 
-# ---------------------- Channel versions (Evergreen + winget) ----------------------
-function Get-ChannelVersions {
-  param([string]$EvergreenName,[string]$WingetId,[string]$PreferredChannel)
-  $ever = $null; $wing = $null
-  if ($EvergreenName -and (Test-EvergreenReady)) { $ever = Get-LatestFromEvergreen -EvergreenName $EvergreenName -PreferredChannel $PreferredChannel }
-  if ($WingetId -and (Test-WingetReady))         { $wing = Get-LatestFromWinget    -WingetId       $WingetId }
-  [pscustomobject]@{
-    EvergreenStable = if($ever  -and $ever.PSObject.Properties['Version']){ $ever.Version } else { $null }
-    WingetLatest    = if($wing  -and $wing.PSObject.Properties['Version']){ $wing.Version } else { $null }
-  }
-}
+# HTML gating BEFORE upgrades (respect -NoHtml)
+$pendingHtml = $false
+if (-not $NoHtml) {
+    # ignore "Application not installed" when deciding if it's green
+    $issuesNow = $results |
+      Where-Object { $_.Status -ne "Application not installed" } |
+      Where-Object { $_.Status -eq "Update available" -or $_.Status -like "Unknown*" }
 
-# ---------------------- Per-AVD-master run ----------------------
-$machine  = $env:COMPUTERNAME
-$wingetOk = Test-WingetReady
-$everOk   = Test-EvergreenReady
+    if ($HtmlOnlyWhenGreen) {
+        if ($issuesNow.Count -eq 0 -and -not $Upgrade) { Write-ReportHtml -Results $results }
+        elseif ($Upgrade) { $pendingHtml = $true; Write-Host "Skipping HTML for now; will generate after upgrades if everything goes green." -ForegroundColor DarkYellow }
+    } else { Write-ReportHtml -Results $results }
+} else { Write-Host "Skipping HTML report." -ForegroundColor DarkGray }
 
-$expectedMasters = $MasterMap | Select-Object -ExpandProperty Master
-if ($machine -notin $expectedMasters) {
-  Write-Warning "This script is intended for AVD master images: $($expectedMasters -join ', '). Current machine: $machine"
-}
-
-Write-Host "Reporting for $machine  |  Period: $Period" -ForegroundColor Cyan
-if (-not $everOk)  { Write-Warning "Evergreen module not available. Install with: Install-Module Evergreen -Scope AllUsers" }
-if (-not $wingetOk){ Write-Warning "winget not available. Newer-than-Evergreen note may be missing." }
-
-# --- NEW: capture OS info for this machine ---
-try {
-  $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
-  $reg = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue
-  $caption = $os.Caption
-  $displayVer = $reg.DisplayVersion
-  if ($displayVer) { $caption = "$caption $displayVer" }
-  $build = $os.BuildNumber
-  $ubr = $reg.UBR
-  $buildFull = if ($ubr -ne $null) { "$build.$ubr" } else { $build }
-  $osInfo = [pscustomobject]@{
-    Computer  = $machine
-    OSName    = $caption
-    OSVersion = $os.Version
-    OSBuild   = $buildFull
-  }
-} catch { $osInfo = [pscustomobject]@{ Computer=$machine; OSName='-'; OSVersion='-'; OSBuild='-' } }
-
-# Save OS info CSV
-$osInfoCsv = Join-Path $monthFolder ("{0} OSInfo {1}.csv" -f $machine,$todayIso)
-$osInfo | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $osInfoCsv
-
-$rows = @()
-
-foreach ($app in $AppsToCheck) {
-
-  if ($app.IsAdobeFull) {
-    $installed = Get-AdobeFullInstalledVersion
-    if (-not $installed) {
-      $rows += [pscustomobject]@{ Computer=$machine; Application=$app.Name; Installed='-'; Latest='-'; Status='Application not installed'; Css=''; LatestCss='' }
-      continue
+# Upgrades
+if ($Upgrade) {
+    Invoke-AppUpgrades -Results $results -AppConfig $AppsToCheck -IncludeWindowsUpdate:$IncludeWindowsUpdate -WhatIf:$WhatIf -WindowsOnly:$WindowsUpdateOnly
+    if ($pendingHtml -and -not $NoHtml) {
+        $resultsPost = Get-AppResults -Apps $AppsToCheck
+        $issuesPost  = $resultsPost |
+          Where-Object { $_.Status -ne "Application not installed" } |
+          Where-Object { $_.Status -eq "Update available" -or $_.Status -like "Unknown*" }
+        if ($issuesPost.Count -eq 0) { Write-ReportHtml -Results $resultsPost }
+        else { Write-Host "Still not fully green; HTML not generated. ($($issuesPost.Count) item(s) still need attention.)" -ForegroundColor DarkYellow }
     }
-    $adobeLatest = Get-LatestFromAdobeAcrobatFull
-    if ($adobeLatest) {
-      $cmp = Compare-VersionSmart -Installed $installed -Latest $adobeLatest
-      if ($cmp -eq 0)       { $status = "Latest version installed as of $todayUK"; $css='ok' }
-      elseif ($cmp -lt 0)   { $status = "Update available"; $css='bad' }
-      else                  { $status = "Ahead of catalog as of $todayUK"; $css='ok' }
-      $rows += [pscustomobject]@{ Computer=$machine; Application=$app.Name; Installed=$installed; Latest=$adobeLatest; Status=$status; Css=$css; LatestCss=$css }
-    } else {
-      $rows += [pscustomobject]@{ Computer=$machine; Application=$app.Name; Installed=$installed; Latest='-'; Status='Unknown (could not query Adobe feed)'; Css=''; LatestCss='' }
-    }
-    continue
-  }
-
-  $installed = if ($app.LocalMatch) { Get-InstalledVersion -DisplayNameMatch $app.LocalMatch } else { $null }
-  if (-not $installed) {
-    $rows += [pscustomobject]@{ Computer=$machine; Application=$app.Name; Installed='-'; Latest='-'; Status='Application not installed'; Css=''; LatestCss='' }
-    continue
-  }
-
-  $chan = Get-ChannelVersions -EvergreenName $app.EvergreenName -WingetId $app.WingetId -PreferredChannel $app.PreferredChannel
-
-  $latestToShow = $null; $status = ''; $css = ''; $latestCss = ''
-
-  if ($chan.EvergreenStable) {
-    $ev = $chan.EvergreenStable
-    $latestToShow = "$ev (Latest Evergreen stable version)"
-    if ($chan.WingetLatest) {
-      $cmpWingVsEver = Compare-VersionSmart -Installed $chan.WingetLatest -Latest $ev
-      if ($cmpWingVsEver -gt 0) { $latestToShow = "$($chan.WingetLatest) (waiting on Evergreen release)"; $latestCss='info' }
-    }
-    $cmp = Compare-VersionSmart -Installed $installed -Latest $ev
-    if     ($cmp -eq 0) { $status = "Latest Evergreen stable version installed as of $todayUK"; $css='ok' }
-    elseif ($cmp -lt 0) { $status = "Update available (vs Evergreen Stable)"; $css='bad'; if(-not $latestCss){$latestCss='bad'} }
-    else                { $status = "Ahead of Evergreen Stable as of $todayUK"; $css='ok' }
-  }
-  else {
-    if ($chan.WingetLatest) {
-      $cmp = Compare-VersionSmart -Installed $installed -Latest $chan.WingetLatest
-      if     ($cmp -eq 0) { $latestToShow=$chan.WingetLatest; $status="Latest version installed as of $todayUK"; $css='ok' }
-      elseif ($cmp -gt 0) { $latestToShow=$chan.WingetLatest; $status="Ahead of catalog as of $todayUK"; $css='ok' }
-      else {
-        if ($app.ExpectEvergreen) { $latestToShow="$($chan.WingetLatest) (Evergreen not available)"; $status="Evergreen not available"; $css='bad'; $latestCss='bad' }
-        else { $latestToShow=$chan.WingetLatest; $status="Update available (catalog)"; $css='bad'; $latestCss='bad' }
-      }
-    } else { $latestToShow='-'; $status="Unknown (no latest info)"; $css='' }
-  }
-
-  if (-not $latestToShow) { $latestToShow='-' }
-  $rows += [pscustomobject]@{
-    Computer=$machine; Application=$app.Name; Installed=$installed; Latest=$latestToShow; Status=$status; Css=$css; LatestCss=$latestCss
-  }
-}
-
-# Save per-machine CSV (apps)
-$machineCsv = Join-Path $monthFolder ("{0} AppStatus {1}.csv" -f $machine,$todayIso)
-$rows | Sort-Object Application | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $machineCsv
-Write-Host "Per-machine report written: $machineCsv" -ForegroundColor Green
-
-# Save OS updates (we filter later)
-$osRowsAll = Get-RecentOSUpdates
-$osCsv  = Join-Path $monthFolder ("{0} OSUpdates {1}.csv" -f $machine,$todayIso)
-$osRowsAll | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $osCsv
-Write-Host "OS updates saved: $osCsv" -ForegroundColor DarkCyan
-
-# Ask to combine unless instructed otherwise
-if (-not $NoCombine -and -not $Combine) {
-  $ans = Read-Host "Create combined report for '$Period'? (Y/N)"
-  if ($ans -match '^(y|yes)$') { $Combine = $true }
-}
-
-# ---------------------- Combine ----------------------
-if ($Combine) {
-  Write-Host "Building combined report for $Period..." -ForegroundColor Cyan
-
-  $appFiles = Get-ChildItem -Path $monthFolder -Filter "* AppStatus *.csv" -ErrorAction SilentlyContinue
-  if (-not $appFiles) { Write-Warning "No AppStatus CSVs found."; return }
-  $allApps = @(); foreach($f in $appFiles){ $allApps += Import-CsvRobust -Path $f.FullName }
-
-  $osFiles = Get-ChildItem -Path $monthFolder -Filter "* OSUpdates *.csv" -ErrorAction SilentlyContinue
-  $allOs   = @(); foreach($f in ($osFiles | Where-Object { $_ })){ $allOs += Import-CsvRobust -Path $f.FullName }
-
-  # NEW: OS Info files
-  $osInfoFiles = Get-ChildItem -Path $monthFolder -Filter "* OSInfo *.csv" -ErrorAction SilentlyContinue
-  $osInfoMap = @{}  # Computer -> info object
-  foreach($f in $osInfoFiles){
-    $info = Import-CsvRobust -Path $f.FullName
-    foreach($row in $info){
-      if (-not $osInfoMap.ContainsKey($row.Computer)) { $osInfoMap[$row.Computer] = $row }
-    }
-  }
-
-  function Convert-ToDate {
-    param($s)
-    if ($s -is [datetime]) { return $s }
-    foreach ($fmt in @('dd/MM/yyyy HH:mm:ss','dd/MM/yyyy','MM/dd/yyyy HH:mm:ss','MM/dd/yyyy','yyyy-MM-ddTHH:mm:ss','yyyy-MM-dd HH:mm:ss')) {
-      try { return [datetime]::ParseExact("$s",$fmt,[System.Globalization.CultureInfo]::InvariantCulture) } catch {}
-    }
-    try { return [datetime]::Parse("$s",[System.Globalization.CultureInfo]::GetCultureInfo('en-GB')) } catch {}
-    try { return (Get-Date -Date $s -ErrorAction Stop) } catch { return $null }
-  }
-  $allOs = $allOs | ForEach-Object { if ($_.InstalledOn) { $_.InstalledOn = Convert-ToDate $_.InstalledOn }; $_ }
-
-  if (-not $allApps -or $allApps.Count -eq 0) { Write-Warning "No data rows to combine."; return }
-
-  $baseName     = "AVD Monthly patching report $todayIso"
-  $combinedCsv  = Join-Path $monthFolder ($baseName + ".csv")
-  $combinedHtml = Join-Path $monthFolder ($baseName + ".html")
-  $combinedPdf  = Join-Path $monthFolder ($baseName + ".pdf")
-
-  $allApps | Sort-Object Computer, Application | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $combinedCsv
-  Write-Host "Combined CSV written: $combinedCsv" -ForegroundColor Green
-
-  $null = New-CombinedHtml -AppData $allApps -OsData $allOs -OsInfoMap $osInfoMap `
-           -Title "AVD Monthly patching report ($Period)" `
-           -OutPath $combinedHtml -Map $MasterMap -Period $Period
-  Write-Host "Combined HTML written: $combinedHtml" -ForegroundColor Green
-
-  Convert-HtmlToPdf -HtmlPath $combinedHtml -PdfPath $combinedPdf | Out-Null
 }
