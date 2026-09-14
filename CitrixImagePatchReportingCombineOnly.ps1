@@ -7,15 +7,18 @@ param(
 # ============================================================
 # CITRIX MONTHLY PATCHING REPORT - COMBINE ONLY
 #
-# This script does NOT scan the local machine.
+# DOES NOT SCAN THE LOCAL MACHINE
 #
-# It only reads existing CSV files from the repository:
+# Reads existing repository CSVs:
 #
 #   SERVER-AppStatus-YYYY-MM-DD.csv
 #   SERVER-OSInfo-YYYY-MM-DD.csv
 #   SERVER-OSUpdates-YYYY-MM-DD.csv
 #
-# It then creates one combined HTML report.
+# Creates one combined HTML report.
+#
+# If multiple reports exist for the same server, the newest
+# dated report is used.
 # ============================================================
 
 
@@ -40,13 +43,13 @@ $MasterMap = @(
     [pscustomobject]@{
         Master      = 'UKST1MICTXMI2D'
         Environment = 'Dev'
-        Citrix      = '-'
+        Citrix      = 'Persistent DEV'
     }
 
     [pscustomobject]@{
         Master      = 'UKST1MICTXMI2U'
-        Environment = 'UAT'
-        Citrix      = '-'
+        Environment = 'CTE'
+        Citrix      = 'Persistent CTE'
     }
 
     [pscustomobject]@{
@@ -75,7 +78,9 @@ $MasterMap = @(
 
 $CatalogMap = @(
 
-    # ---------------- MI4C ----------------
+    # ========================================================
+    # MI4C - Admin / Specialist applications
+    # ========================================================
 
     [pscustomobject]@{
         Name   = 'Windows 10 Multi Session UK South 3E Azure DR Prod'
@@ -150,7 +155,9 @@ $CatalogMap = @(
     }
 
 
-    # ---------------- MI5 ----------------
+    # ========================================================
+    # MI5 - Production Standard
+    # ========================================================
 
     [pscustomobject]@{
         Name   = 'Windows 10 Multi Session UK South Standard Prod'
@@ -159,7 +166,9 @@ $CatalogMap = @(
     }
 
 
-    # ---------------- MI1U ----------------
+    # ========================================================
+    # MI1U - CTE Multi Session
+    # ========================================================
 
     [pscustomobject]@{
         Name   = 'Windows 10 Multi Session UK South CTE'
@@ -174,7 +183,9 @@ $CatalogMap = @(
     }
 
 
-    # ---------------- MI1D ----------------
+    # ========================================================
+    # MI1D - DEV Multi Session
+    # ========================================================
 
     [pscustomobject]@{
         Name   = 'Windows 10 Multi Session UK South DEV'
@@ -189,7 +200,9 @@ $CatalogMap = @(
     }
 
 
-    # ---------------- MI3U ----------------
+    # ========================================================
+    # MI3U - Non-Prod Standard
+    # ========================================================
 
     [pscustomobject]@{
         Name   = 'Windows 10 Multi Session UK South Standard Non-Prod'
@@ -201,6 +214,34 @@ $CatalogMap = @(
         Name   = 'Windows 10 Multi Session UK South Standard Non-Prod IT UAT'
         Master = 'UKST1MICTXMI3U'
         Type   = 'Multi Session'
+    }
+
+
+    # ========================================================
+    # MI2D - DEV PERSISTENT
+    # ========================================================
+
+    [pscustomobject]@{
+        Name   = 'Windows 10 SU UK South Persistent DEV'
+        Master = 'UKST1MICTXMI2D'
+        Type   = 'Persistent'
+    }
+
+    [pscustomobject]@{
+        Name   = 'Windows 10 SU UK South Persistent DEV 3rd Party Access'
+        Master = 'UKST1MICTXMI2D'
+        Type   = 'Persistent'
+    }
+
+
+    # ========================================================
+    # MI2U - CTE PERSISTENT
+    # ========================================================
+
+    [pscustomobject]@{
+        Name   = 'Windows 10 SU UK South Persistent CTE'
+        Master = 'UKST1MICTXMI2U'
+        Type   = 'Persistent'
     }
 )
 
@@ -214,14 +255,13 @@ $monthFolder = Join-Path $ShareRoot $Period
 if (-not (Test-Path $monthFolder)) {
 
     throw "Repository folder does not exist: $monthFolder"
-
 }
 
-Write-Host ""
-Write-Host "==============================================" -ForegroundColor Cyan
-Write-Host " Citrix Monthly Report - Combine Only" -ForegroundColor Cyan
-Write-Host "==============================================" -ForegroundColor Cyan
 
+Write-Host ""
+Write-Host "====================================================" -ForegroundColor Cyan
+Write-Host " Citrix Monthly Patching Report - Combine Only" -ForegroundColor Cyan
+Write-Host "====================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Repository : $monthFolder"
 Write-Host "Period     : $Period"
@@ -243,6 +283,7 @@ function Import-CsvRobust {
         [int]$DelayMs = 500
     )
 
+
     for ($i = 1; $i -le $Retries; $i++) {
 
         try {
@@ -259,7 +300,6 @@ function Import-CsvRobust {
                 Write-Warning "Failed to read '$Path': $($_.Exception.Message)"
 
                 return @()
-
             }
 
             Start-Sleep -Milliseconds $DelayMs
@@ -269,7 +309,7 @@ function Import-CsvRobust {
 
 
 # ============================================================
-# CONVERT DATE
+# DATE CONVERSION
 # ============================================================
 
 function Convert-ToDate {
@@ -280,9 +320,11 @@ function Convert-ToDate {
         return $null
     }
 
+
     if ($Value -is [datetime]) {
         return $Value
     }
+
 
     foreach ($format in @(
 
@@ -306,8 +348,8 @@ function Convert-ToDate {
 
         }
         catch {}
-
     }
+
 
     try {
 
@@ -319,17 +361,19 @@ function Convert-ToDate {
     }
     catch {}
 
+
     return $null
 }
 
 
 # ============================================================
-# GET LATEST FILE PER SERVER
+# FIND LATEST REPORT PER SERVER
 # ============================================================
 
 function Get-LatestReportFiles {
 
     param(
+
         [Parameter(Mandatory)]
         [string]$Folder,
 
@@ -337,7 +381,9 @@ function Get-LatestReportFiles {
         [string]$ReportType
     )
 
+
     $files = @(
+
         Get-ChildItem `
             -Path $Folder `
             -Filter "*-$ReportType-*.csv" `
@@ -345,61 +391,88 @@ function Get-LatestReportFiles {
             -ErrorAction SilentlyContinue
     )
 
+
     if (-not $files) {
+
         return @()
     }
 
+
     $parsed = foreach ($file in $files) {
 
-        # Expected:
-        # SERVER-AppStatus-2026-09-14.csv
-        #
-        # or:
-        # SERVER-OSInfo-2026-09-14.csv
-        #
-        # or:
-        # SERVER-OSUpdates-2026-09-14.csv
 
-        if ($file.Name -match "^(?<Computer>.+)-$ReportType-(?<Date>\d{4}-\d{2}-\d{2})\.csv$") {
+        # Expected filename:
+        #
+        # UKST1MICTXMI5-AppStatus-2026-09-14.csv
+        #
+        # UKST1MICTXMI5-OSInfo-2026-09-14.csv
+        #
+        # UKST1MICTXMI5-OSUpdates-2026-09-14.csv
+
+
+        if (
+            $file.Name -match
+            "^(?<Computer>.+)-$ReportType-(?<Date>\d{4}-\d{2}-\d{2})\.csv$"
+        ) {
 
             $reportDate = $null
 
+
             try {
+
                 $reportDate = [datetime]::ParseExact(
                     $Matches.Date,
                     'yyyy-MM-dd',
                     [System.Globalization.CultureInfo]::InvariantCulture
                 )
+
             }
             catch {}
+
 
             [pscustomobject]@{
 
                 Computer   = $Matches.Computer
-                ReportDate = $reportDate
-                File       = $file
 
+                ReportDate = $reportDate
+
+                File       = $file
             }
         }
     }
 
-    # Get newest report for each computer
-    $latest = foreach ($group in ($parsed | Group-Object Computer)) {
+
+    # Select newest dated report per server
+
+    $latest = foreach (
+        $group in (
+            $parsed |
+            Group-Object Computer
+        )
+    ) {
 
         $group.Group |
-            Sort-Object `
-                @{ Expression = 'ReportDate'; Descending = $true },
-                @{ Expression = { $_.File.LastWriteTime }; Descending = $true } |
-            Select-Object -First 1
 
+            Sort-Object `
+                @{
+                    Expression = 'ReportDate'
+                    Descending = $true
+                },
+                @{
+                    Expression = { $_.File.LastWriteTime }
+                    Descending = $true
+                } |
+
+            Select-Object -First 1
     }
+
 
     return @($latest)
 }
 
 
 # ============================================================
-# HTML CREATOR
+# HTML GENERATOR
 # ============================================================
 
 function New-CombinedHtml {
@@ -424,7 +497,11 @@ function New-CombinedHtml {
     )
 
 
-    $css = @"
+# ============================================================
+# CSS
+# ============================================================
+
+$css = @"
 <style>
 
 body {
@@ -436,10 +513,6 @@ body {
 
 h1 {
     margin: 0 0 18px 0;
-}
-
-h2 {
-    margin-top: 0;
 }
 
 h3 {
@@ -535,6 +608,11 @@ th {
     font-weight: 600;
 }
 
+.catalogue-type {
+    margin-top: 10px;
+    font-weight: 600;
+}
+
 ul {
     margin: 5px 0 15px 22px;
 }
@@ -543,9 +621,9 @@ ul {
 "@
 
 
-    # ========================================================
-    # MONTH
-    # ========================================================
+# ============================================================
+# REPORT MONTH
+# ============================================================
 
     try {
 
@@ -559,7 +637,6 @@ ul {
     catch {
 
         throw "Period must be in the format 'MMMM yyyy'. Example: September 2026"
-
     }
 
 
@@ -571,12 +648,13 @@ ul {
         -Minute 0 `
         -Second 0
 
+
     $monthEnd = $monthStart.AddMonths(1)
 
 
-    # ========================================================
-    # DISCOVER COMPUTERS
-    # ========================================================
+# ============================================================
+# DISCOVER SERVERS FROM REPOSITORY DATA
+# ============================================================
 
     $computers = @(
 
@@ -587,51 +665,70 @@ ul {
         $OsInfoMap.Keys
 
     ) |
+
     Where-Object { $_ } |
+
     Select-Object -Unique |
+
     Sort-Object
 
 
-    # ========================================================
-    # EXPECTED MASTER IMAGES
-    # ========================================================
+# ============================================================
+# EXPECTED MASTER COUNT
+# ============================================================
 
     $allMasters = @(
+
         $Map |
+
         Select-Object -ExpandProperty Master -Unique |
+
         Sort-Object
     )
 
 
     $presentMasters = @(
+
         $computers |
+
         Where-Object {
+
             $allMasters -contains $_
+
         } |
+
         Sort-Object
     )
 
 
     $missingMasters = @(
+
         $allMasters |
+
         Where-Object {
+
             $presentMasters -notcontains $_
+
         } |
+
         Sort-Object
     )
 
 
-    $countLine = "Master image count: $($presentMasters.Count) of $($allMasters.Count)"
+    $countLine =
+        "Master image count: $($presentMasters.Count) of $($allMasters.Count)"
 
 
     $missingLine = ""
 
+
     if ($missingMasters.Count -gt 0) {
 
         $missingLine =
-            "No current repository report found for: " +
-            ($missingMasters -join ', ')
 
+            "No current repository report found for: " +
+
+            ($missingMasters -join ', ')
     }
 
 
@@ -639,116 +736,151 @@ ul {
 <div class='summary'>
 
     <div class='headerline'>
+
         $countLine
+
     </div>
 
     $(if ($missingLine) {
+
         "<div class='warn'>$missingLine</div>"
+
     })
 
 </div>
 "@
 
 
-    # ========================================================
-    # PER MACHINE SECTIONS
-    # ========================================================
+# ============================================================
+# CREATE SERVER SECTIONS
+# ============================================================
 
     $sections = foreach ($comp in $computers) {
 
 
-        # ----------------------------------------------------
-        # APPLICATIONS
-        # ----------------------------------------------------
+# ------------------------------------------------------------
+# APPLICATION DATA
+# ------------------------------------------------------------
 
         $apps = @(
+
             $AppData |
+
             Where-Object {
 
                 $_.Computer -ieq $comp -and
+
                 $_.Status -ne 'Application not installed'
 
             } |
+
             Sort-Object Application
         )
 
 
-        # ----------------------------------------------------
-        # OS UPDATES - THIS MONTH
-        # ----------------------------------------------------
+# ------------------------------------------------------------
+# OS UPDATES THIS MONTH
+# ------------------------------------------------------------
 
         $osMonth = @(
+
             $OsData |
+
             Where-Object {
 
                 $_.Computer -ieq $comp -and
+
                 $_.InstalledOn -and
+
                 $_.InstalledOn -ge $monthStart -and
+
                 $_.InstalledOn -lt $monthEnd
 
             } |
+
             Sort-Object InstalledOn -Descending
         )
 
 
-        # ----------------------------------------------------
-        # OS UPDATES - PREVIOUS 3
-        # ----------------------------------------------------
+# ------------------------------------------------------------
+# THREE PREVIOUS OS UPDATES
+# ------------------------------------------------------------
 
         $osPrev3 = @(
+
             $OsData |
+
             Where-Object {
 
                 $_.Computer -ieq $comp -and
+
                 $_.InstalledOn -and
+
                 $_.InstalledOn -lt $monthStart
 
             } |
+
             Sort-Object InstalledOn -Descending |
+
             Select-Object -First 3
         )
 
 
-        # ----------------------------------------------------
-        # MASTER MAPPING
-        # ----------------------------------------------------
+# ------------------------------------------------------------
+# MASTER IMAGE INFORMATION
+# ------------------------------------------------------------
 
         $mapRows = @(
+
             $Map |
+
             Where-Object {
+
                 $_.Master -ieq $comp
             }
         )
 
 
         $envs = (
+
             $mapRows.Environment |
+
             Where-Object { $_ } |
+
             Select-Object -Unique
+
         ) -join ', '
 
 
         $ctxs = (
+
             $mapRows.Citrix |
+
             Where-Object { $_ } |
+
             Select-Object -Unique
+
         ) -join ', '
 
 
         if (-not $envs) {
+
             $envs = '-'
         }
 
+
         if (-not $ctxs) {
+
             $ctxs = '-'
         }
 
 
-        # ----------------------------------------------------
-        # OS INFO
-        # ----------------------------------------------------
+# ------------------------------------------------------------
+# OS INFORMATION
+# ------------------------------------------------------------
 
         $osTag = ''
+
 
         if ($OsInfoMap.ContainsKey($comp)) {
 
@@ -756,44 +888,61 @@ ul {
 
             $osParts = @()
 
-            if ($oi.OSName -and $oi.OSName -ne '-') {
+
+            if (
+                $oi.OSName -and
+                $oi.OSName -ne '-'
+            ) {
+
                 $osParts += $oi.OSName
             }
 
-            if ($oi.OSVersion -and $oi.OSVersion -ne '-') {
+
+            if (
+                $oi.OSVersion -and
+                $oi.OSVersion -ne '-'
+            ) {
+
                 $osParts += $oi.OSVersion
             }
 
-            if ($oi.OSBuild -and $oi.OSBuild -ne '-') {
+
+            if (
+                $oi.OSBuild -and
+                $oi.OSBuild -ne '-'
+            ) {
+
                 $osParts += "(Build $($oi.OSBuild))"
             }
+
 
             if ($osParts.Count -gt 0) {
 
                 $osTag = $osParts -join ' '
-
             }
         }
 
 
-        # ----------------------------------------------------
-        # CATALOGUES
-        # ----------------------------------------------------
+# ------------------------------------------------------------
+# MACHINE CATALOGUES
+# ------------------------------------------------------------
 
         $cats = @(
-            foreach ($c in (
-                $CatalogMap |
-                Where-Object {
-                    $_.Master -ieq $comp
-                }
-            )) {
+
+            foreach (
+                $c in (
+                    $CatalogMap |
+                    Where-Object {
+                        $_.Master -ieq $comp
+                    }
+                )
+            ) {
 
                 [pscustomobject]@{
 
                     Name = $c.Name
 
                     Type = $c.Type
-
                 }
             }
         )
@@ -803,19 +952,29 @@ ul {
 
 
         $multiSession = @(
+
             $cats |
+
             Where-Object {
+
                 $_.Type -eq 'Multi Session'
+
             } |
+
             Select-Object -ExpandProperty Name
         )
 
 
         $persistent = @(
+
             $cats |
+
             Where-Object {
+
                 $_.Type -eq 'Persistent'
+
             } |
+
             Select-Object -ExpandProperty Name
         )
 
@@ -823,81 +982,119 @@ ul {
         $catHtml = @()
 
 
+# ------------------------------------------------------------
+# MULTI SESSION CATALOGUES
+# ------------------------------------------------------------
+
         if ($multiSession.Count -gt 0) {
 
             $items = (
+
                 $multiSession |
+
                 ForEach-Object {
+
                     "<li>$_</li>"
                 }
+
             ) -join "`n"
 
+
             $catHtml += @"
-<div class='catlabel'>Multi Session</div>
+<div class='catalogue-type'>
+Multi Session
+</div>
 
 <ul>
 $items
 </ul>
 "@
-
         }
 
+
+# ------------------------------------------------------------
+# PERSISTENT CATALOGUES
+# ------------------------------------------------------------
 
         if ($persistent.Count -gt 0) {
 
             $items = (
+
                 $persistent |
+
                 ForEach-Object {
+
                     "<li>$_</li>"
                 }
+
             ) -join "`n"
 
+
             $catHtml += @"
-<div class='catlabel'>Persistent</div>
+<div class='catalogue-type'>
+Persistent
+</div>
 
 <ul>
 $items
 </ul>
 "@
-
         }
 
 
         if ($catHtml.Count -eq 0) {
 
             $catHtml = @(
+
                 '<em>No catalogues mapped.</em>'
             )
-
         }
 
 
-        # ----------------------------------------------------
-        # APPLICATION HTML ROWS
-        # ----------------------------------------------------
+# ------------------------------------------------------------
+# APPLICATION HTML ROWS
+# ------------------------------------------------------------
 
         $appRows = @(
+
             foreach ($a in $apps) {
+
 
                 $rowCss = $a.Css
 
-                $latestCss = if ($a.LatestCss) {
 
-                    $a.LatestCss
+                $latestCss =
 
-                }
-                else {
+                    if ($a.LatestCss) {
 
-                    $rowCss
+                        $a.LatestCss
 
-                }
+                    }
+                    else {
+
+                        $rowCss
+                    }
+
 
 @"
 <tr>
-    <td class='$rowCss'>$($a.Application)</td>
-    <td class='$rowCss'>$($a.Installed)</td>
-    <td class='$latestCss'>$($a.Latest)</td>
-    <td class='$rowCss'>$($a.Status)</td>
+
+    <td class='$rowCss'>
+        $($a.Application)
+    </td>
+
+    <td class='$rowCss'>
+        $($a.Installed)
+    </td>
+
+    <td class='$latestCss'>
+        $($a.Latest)
+    </td>
+
+    <td class='$rowCss'>
+        $($a.Status)
+    </td>
+
 </tr>
 "@
 
@@ -910,36 +1107,48 @@ $items
             $appRows = @(
 
                 "<tr><td colspan='4'><em>No application report data found.</em></td></tr>"
-
             )
-
         }
 
 
-        # ----------------------------------------------------
-        # OS THIS MONTH HTML
-        # ----------------------------------------------------
+# ------------------------------------------------------------
+# OS UPDATES THIS MONTH
+# ------------------------------------------------------------
 
         $osRowsMonth = @()
 
 
         foreach ($o in $osMonth) {
 
+
             $date = '-'
+
 
             if ($o.InstalledOn) {
 
                 $date =
-                    $o.InstalledOn.ToString('dd/MM/yyyy')
 
+                    $o.InstalledOn.ToString(
+                        'dd/MM/yyyy'
+                    )
             }
 
 
             $osRowsMonth += @"
 <tr>
-    <td class='os-in-month'>$($o.KB)</td>
-    <td class='os-in-month'>$($o.Description)</td>
-    <td class='os-in-month'>$date</td>
+
+    <td class='os-in-month'>
+        $($o.KB)
+    </td>
+
+    <td class='os-in-month'>
+        $($o.Description)
+    </td>
+
+    <td class='os-in-month'>
+        $date
+    </td>
+
 </tr>
 "@
 
@@ -951,36 +1160,48 @@ $items
             $osRowsMonth = @(
 
                 "<tr><td colspan='3'><em>No OS updates were installed in $Period.</em></td></tr>"
-
             )
-
         }
 
 
-        # ----------------------------------------------------
-        # PREVIOUS OS HTML
-        # ----------------------------------------------------
+# ------------------------------------------------------------
+# PREVIOUS THREE OS UPDATES
+# ------------------------------------------------------------
 
         $osRowsPrev3 = @()
 
 
         foreach ($o in $osPrev3) {
 
+
             $date = '-'
+
 
             if ($o.InstalledOn) {
 
                 $date =
-                    $o.InstalledOn.ToString('dd/MM/yyyy')
 
+                    $o.InstalledOn.ToString(
+                        'dd/MM/yyyy'
+                    )
             }
 
 
             $osRowsPrev3 += @"
 <tr>
-    <td>$($o.KB)</td>
-    <td>$($o.Description)</td>
-    <td>$date</td>
+
+    <td>
+        $($o.KB)
+    </td>
+
+    <td>
+        $($o.Description)
+    </td>
+
+    <td>
+        $date
+    </td>
+
 </tr>
 "@
 
@@ -992,37 +1213,48 @@ $items
             $osRowsPrev3 = @(
 
                 "<tr><td colspan='3'><em>No previous OS update data found.</em></td></tr>"
-
             )
-
         }
 
 
-        # ----------------------------------------------------
-        # MACHINE PANEL
-        # ----------------------------------------------------
+# ------------------------------------------------------------
+# SERVER PANEL
+# ------------------------------------------------------------
 
 @"
 <div class='panel'>
+
 
     <div class='headerline'>
 
         $comp
 
+
         <span class='tag'>
+
             Env: $envs
+
         </span>
 
+
         <span class='tag'>
+
             Citrix: $ctxs
+
         </span>
 
+
         <span class='tag'>
+
             Catalogues: $catTotal
+
         </span>
+
 
         $(if ($osTag) {
+
             "<span class='tag'>OS: $osTag</span>"
+
         })
 
     </div>
@@ -1034,32 +1266,47 @@ $items
     <div>
 
         <span class='catlabel'>
+
             Citrix Machine catalogues:
+
         </span>
 
+
         <br/>
+
 
         $(($catHtml -join "`n"))
 
     </div>
 
 
-    <h3>Applications</h3>
+    <h3>
+        Applications
+    </h3>
 
 
     <table>
+
 
         <thead>
 
             <tr>
 
-                <th>Application</th>
+                <th>
+                    Application
+                </th>
 
-                <th>Installed</th>
+                <th>
+                    Installed
+                </th>
 
-                <th>Latest</th>
+                <th>
+                    Latest
+                </th>
 
-                <th>Status</th>
+                <th>
+                    Status
+                </th>
 
             </tr>
 
@@ -1072,25 +1319,35 @@ $items
 
         </tbody>
 
+
     </table>
 
 
     <h3>
+
         OS updates applied in $Period
+
     </h3>
 
 
     <table>
 
+
         <thead>
 
             <tr>
 
-                <th>KB</th>
+                <th>
+                    KB
+                </th>
 
-                <th>Description</th>
+                <th>
+                    Description
+                </th>
 
-                <th>Installed On</th>
+                <th>
+                    Installed On
+                </th>
 
             </tr>
 
@@ -1103,25 +1360,35 @@ $items
 
         </tbody>
 
+
     </table>
 
 
     <h3>
+
         OS updates - recent 3 excluding this month
+
     </h3>
 
 
     <table>
 
+
         <thead>
 
             <tr>
 
-                <th>KB</th>
+                <th>
+                    KB
+                </th>
 
-                <th>Description</th>
+                <th>
+                    Description
+                </th>
 
-                <th>Installed On</th>
+                <th>
+                    Installed On
+                </th>
 
             </tr>
 
@@ -1134,7 +1401,9 @@ $items
 
         </tbody>
 
+
     </table>
+
 
 </div>
 "@
@@ -1142,11 +1411,11 @@ $items
     }
 
 
-    # ========================================================
-    # FINAL HTML
-    # ========================================================
+# ============================================================
+# FINAL HTML
+# ============================================================
 
-    $html = @"
+$html = @"
 <!DOCTYPE html>
 
 <html>
@@ -1188,8 +1457,8 @@ AppStatus CSV report found for each master image.
 
 <p class='small'>
 
-OS information is taken from the latest OSInfo and
-OSUpdates CSV reports found for each master image.
+Operating system information is taken from the latest
+OSInfo and OSUpdates CSV reports found for each master image.
 
 </p>
 
@@ -1197,6 +1466,7 @@ OSUpdates CSV reports found for each master image.
 <p class='small'>
 
 Generated from repository data:
+
 $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')
 
 </p>
@@ -1209,6 +1479,7 @@ $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')
 
 
     $html |
+
         Set-Content `
             -Path $OutPath `
             -Encoding UTF8
@@ -1219,12 +1490,15 @@ $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')
 
 
 # ============================================================
-# GET APP STATUS FILES
+# LOAD APPSTATUS REPORTS
 # ============================================================
 
+Write-Host ""
 Write-Host "Finding latest AppStatus report for each master..." -ForegroundColor Cyan
 
+
 $appReportFiles =
+
     Get-LatestReportFiles `
         -Folder $monthFolder `
         -ReportType 'AppStatus'
@@ -1238,31 +1512,33 @@ $allApps = @()
 
 foreach ($report in $appReportFiles) {
 
+
     Write-Host `
+
         "  $($report.Computer) -> $($report.File.Name)" `
+
         -ForegroundColor DarkGray
 
 
     $rows =
+
         Import-CsvRobust `
             -Path $report.File.FullName
 
 
-    # Safety:
-    # if the CSV doesn't contain Computer,
-    # add it using the filename.
     foreach ($row in $rows) {
+
 
         if (-not $row.Computer) {
 
+
             $row |
+
                 Add-Member `
                     -NotePropertyName Computer `
                     -NotePropertyValue $report.Computer `
                     -Force
-
         }
-
     }
 
 
@@ -1271,7 +1547,7 @@ foreach ($report in $appReportFiles) {
 
 
 # ============================================================
-# GET OS UPDATE FILES
+# LOAD OS UPDATE REPORTS
 # ============================================================
 
 Write-Host ""
@@ -1279,6 +1555,7 @@ Write-Host "Finding latest OSUpdates report for each master..." -ForegroundColor
 
 
 $osReportFiles =
+
     Get-LatestReportFiles `
         -Folder $monthFolder `
         -ReportType 'OSUpdates'
@@ -1292,37 +1569,43 @@ $allOs = @()
 
 foreach ($report in $osReportFiles) {
 
+
     Write-Host `
+
         "  $($report.Computer) -> $($report.File.Name)" `
+
         -ForegroundColor DarkGray
 
 
     $rows =
+
         Import-CsvRobust `
             -Path $report.File.FullName
 
 
     foreach ($row in $rows) {
 
+
         if (-not $row.Computer) {
 
+
             $row |
+
                 Add-Member `
                     -NotePropertyName Computer `
                     -NotePropertyValue $report.Computer `
                     -Force
-
         }
 
 
         if ($row.InstalledOn) {
 
+
             $row.InstalledOn =
+
                 Convert-ToDate `
                     $row.InstalledOn
-
         }
-
     }
 
 
@@ -1331,7 +1614,7 @@ foreach ($report in $osReportFiles) {
 
 
 # ============================================================
-# GET OS INFO FILES
+# LOAD OSINFO REPORTS
 # ============================================================
 
 Write-Host ""
@@ -1339,6 +1622,7 @@ Write-Host "Finding latest OSInfo report for each master..." -ForegroundColor Cy
 
 
 $osInfoReportFiles =
+
     Get-LatestReportFiles `
         -Folder $monthFolder `
         -ReportType 'OSInfo'
@@ -1352,76 +1636,91 @@ $osInfoMap = @{}
 
 foreach ($report in $osInfoReportFiles) {
 
+
     Write-Host `
+
         "  $($report.Computer) -> $($report.File.Name)" `
+
         -ForegroundColor DarkGray
 
 
     $rows =
+
         Import-CsvRobust `
             -Path $report.File.FullName
 
 
     foreach ($row in $rows) {
 
+
         if (-not $row.Computer) {
 
+
             $row |
+
                 Add-Member `
                     -NotePropertyName Computer `
                     -NotePropertyValue $report.Computer `
                     -Force
-
         }
 
 
         $osInfoMap[$report.Computer] = $row
-
     }
-
 }
 
 
 # ============================================================
-# VALIDATION
+# SUMMARY
 # ============================================================
 
 Write-Host ""
 Write-Host "Repository summary:" -ForegroundColor Cyan
+Write-Host ""
 
 Write-Host "  AppStatus : $($appReportFiles.Count)"
 Write-Host "  OSUpdates : $($osReportFiles.Count)"
 Write-Host "  OSInfo    : $($osInfoReportFiles.Count)"
+
 Write-Host ""
 
 
-if (-not $allApps -or $allApps.Count -eq 0) {
+# ============================================================
+# VALIDATE DATA
+# ============================================================
+
+if (
+    -not $allApps -or
+    $allApps.Count -eq 0
+) {
 
     Write-Warning "No AppStatus report data was found."
 
-    Write-Warning "Expected files similar to:"
+    Write-Warning "Expected filename format:"
 
     Write-Warning "UKST1MICTXMI5-AppStatus-2026-09-14.csv"
 
     return
-
 }
 
 
 # ============================================================
-# BUILD HTML
+# CREATE COMBINED HTML
 # ============================================================
 
 $todayIso =
+
     Get-Date -Format 'yyyy-MM-dd'
 
 
 $combinedHtml =
+
     Join-Path `
         $monthFolder `
         "Citrix-Monthly-Patching-Report-$todayIso.html"
 
 
+Write-Host ""
 Write-Host "Building combined HTML report..." -ForegroundColor Cyan
 
 
@@ -1434,6 +1733,7 @@ New-CombinedHtml `
     -Map $MasterMap `
     -CatalogMap $CatalogMap `
     -Period $Period |
+
     Out-Null
 
 
@@ -1442,11 +1742,13 @@ New-CombinedHtml `
 # ============================================================
 
 Write-Host ""
-Write-Host "==============================================" -ForegroundColor Green
+Write-Host "====================================================" -ForegroundColor Green
 Write-Host " REPORT COMPLETE" -ForegroundColor Green
-Write-Host "==============================================" -ForegroundColor Green
+Write-Host "====================================================" -ForegroundColor Green
 Write-Host ""
 
 Write-Host "Combined HTML:" -ForegroundColor Green
+
 Write-Host $combinedHtml -ForegroundColor Yellow
+
 Write-Host ""
