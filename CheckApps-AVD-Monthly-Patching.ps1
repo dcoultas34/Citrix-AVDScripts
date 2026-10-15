@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    AVD Master Image Application / Patching Report
+    AVD Master Image Application Report
 
 .DESCRIPTION
-    Creates an HTML report containing:
+    Generates an HTML report containing:
 
       1. Operating System Information
       2. Recent Windows Updates
@@ -11,54 +11,68 @@
       4. Other Applications Installed or Updated This Month
       5. Application Inventory
 
-    Designed for AVD master image reporting.
+    Important:
+      - Only ONE result is returned for each Core Application.
+      - Only ONE result is returned for each Inventory Application.
+      - Duplicate uninstall registry entries are automatically handled.
+      - Entries with a valid install date are preferred.
 
-    Output:
-        C:\Ultima\AVDPatchReports\<Month Year>
-        \\transfer\transfer\Citrixapps\AV\<Month Year>
+.OUTPUTS
+    C:\Ultima\AVDPatchReports\<Month Year>
 
-.NOTES
-    Application data is read from both 64-bit and 32-bit
-    Windows uninstall registry locations.
-
-    Where duplicate registry entries exist for the same
-    application/version, the entry containing a valid
-    InstallDate is preferred.
+    \\transfer\transfer\Citrixapps\AV\<Month Year>
 #>
 
 [CmdletBinding()]
 param()
 
 # ============================================================
-# CONFIGURATION
+# GENERAL CONFIGURATION
 # ============================================================
 
 $ComputerName = $env:COMPUTERNAME
-$Now          = Get-Date
-$MonthName    = $Now.ToString("MMMM yyyy")
-$DateStamp    = $Now.ToString("yyyy-MM-dd")
-$RunTime      = $Now.ToString("dd/MM/yyyy HH:mm")
+
+$Now = Get-Date
+
+$MonthName = $Now.ToString("MMMM yyyy")
+
+$DateStamp = $Now.ToString("yyyy-MM-dd")
+
+$RunTime = $Now.ToString("dd/MM/yyyy HH:mm")
 
 # ============================================================
 # OUTPUT LOCATIONS
 # ============================================================
 
 $LocalRoot = "C:\Ultima\AVDPatchReports"
+
 $ShareRoot = "\\transfer\transfer\Citrixapps\AV"
 
-$LocalMonthFolder = Join-Path $LocalRoot $MonthName
-$ShareMonthFolder = Join-Path $ShareRoot $MonthName
+$LocalMonthFolder = Join-Path `
+    $LocalRoot `
+    $MonthName
 
-# Create local reporting folder
+$ShareMonthFolder = Join-Path `
+    $ShareRoot `
+    $MonthName
+
+# ------------------------------------------------------------
+# Create local output folder
+# ------------------------------------------------------------
+
 if (-not (Test-Path $LocalMonthFolder)) {
 
     New-Item `
         -Path $LocalMonthFolder `
         -ItemType Directory `
-        -Force | Out-Null
+        -Force |
+        Out-Null
 }
 
-# Test/create network reporting folder
+# ------------------------------------------------------------
+# Test / create network folder
+# ------------------------------------------------------------
+
 $ShareAvailable = $false
 
 try {
@@ -69,7 +83,8 @@ try {
             -Path $ShareMonthFolder `
             -ItemType Directory `
             -Force `
-            -ErrorAction Stop | Out-Null
+            -ErrorAction Stop |
+            Out-Null
     }
 
     $ShareAvailable = $true
@@ -82,7 +97,13 @@ catch {
 }
 
 # ============================================================
-# CORE APPLICATION UPDATE STATUS
+# CORE APPLICATIONS
+#
+# These applications appear in:
+#
+# Core Application Update Status
+#
+# ONE row only per application.
 # ============================================================
 
 $CoreApplications = @(
@@ -91,9 +112,10 @@ $CoreApplications = @(
         Name = "Microsoft 365 Apps"
 
         Matches = @(
+
             "Microsoft 365 Apps for business - en-gb",
-            "Microsoft 365 Apps for business*",
-            "Microsoft 365 Apps*"
+
+            "Microsoft 365 Apps for business*"
         )
     },
 
@@ -101,16 +123,10 @@ $CoreApplications = @(
         Name = "Adobe Acrobat"
 
         Matches = @(
+
             "Adobe Acrobat (64-bit)",
+
             "Adobe Acrobat*"
-        )
-    },
-
-    @{
-        Name = "Google Chrome"
-
-        Matches = @(
-            "Google Chrome"
         )
     },
 
@@ -118,6 +134,7 @@ $CoreApplications = @(
         Name = "Microsoft Edge"
 
         Matches = @(
+
             "Microsoft Edge"
         )
     },
@@ -126,9 +143,13 @@ $CoreApplications = @(
         Name = "Microsoft Power BI Desktop"
 
         Matches = @(
+
             "Microsoft Power BI Desktop (x64)",
+
             "Microsoft PowerBI Desktop (x64)",
+
             "Microsoft Power BI Desktop*",
+
             "Microsoft PowerBI Desktop*"
         )
     },
@@ -137,21 +158,18 @@ $CoreApplications = @(
         Name = "Microsoft OneDrive"
 
         Matches = @(
+
             "Microsoft OneDrive"
-        )
-    },
-
-    @{
-        Name = "Mozilla Firefox"
-
-        Matches = @(
-            "Mozilla Firefox*"
         )
     }
 )
 
 # ============================================================
 # APPLICATION INVENTORY
+#
+# These appear in the final Inventory table.
+#
+# ONE row only per application.
 # ============================================================
 
 $InventoryApps = @(
@@ -160,6 +178,7 @@ $InventoryApps = @(
         Name = "8x8 Work"
 
         Matches = @(
+
             "8x8 Work*"
         )
     },
@@ -168,7 +187,9 @@ $InventoryApps = @(
         Name = "Adobe Acrobat (64-bit)"
 
         Matches = @(
+
             "Adobe Acrobat (64-bit)",
+
             "Adobe Acrobat*"
         )
     },
@@ -177,6 +198,7 @@ $InventoryApps = @(
         Name = "Foxit PDF Editor"
 
         Matches = @(
+
             "Foxit PDF Editor*"
         )
     },
@@ -185,6 +207,7 @@ $InventoryApps = @(
         Name = "Infor Query & Analysis 11"
 
         Matches = @(
+
             "Infor Query & Analysis 11"
         )
     },
@@ -193,6 +216,7 @@ $InventoryApps = @(
         Name = "Infor Query & Analysis 11 DataLink Server"
 
         Matches = @(
+
             "Infor Query & Analysis 11 DataLink Server*"
         )
     },
@@ -201,7 +225,9 @@ $InventoryApps = @(
         Name = "Microsoft 365 Apps for business - en-gb"
 
         Matches = @(
+
             "Microsoft 365 Apps for business - en-gb",
+
             "Microsoft 365 Apps for business*"
         )
     },
@@ -210,6 +236,7 @@ $InventoryApps = @(
         Name = "Microsoft Edge"
 
         Matches = @(
+
             "Microsoft Edge"
         )
     },
@@ -218,6 +245,7 @@ $InventoryApps = @(
         Name = "Microsoft OneDrive"
 
         Matches = @(
+
             "Microsoft OneDrive"
         )
     },
@@ -226,9 +254,13 @@ $InventoryApps = @(
         Name = "Microsoft PowerBI Desktop (x64)"
 
         Matches = @(
+
             "Microsoft Power BI Desktop (x64)",
+
             "Microsoft PowerBI Desktop (x64)",
+
             "Microsoft Power BI Desktop*",
+
             "Microsoft PowerBI Desktop*"
         )
     },
@@ -237,7 +269,9 @@ $InventoryApps = @(
         Name = "Microsoft Project - en-us"
 
         Matches = @(
+
             "Microsoft Project - en-us*",
+
             "Microsoft Project*"
         )
     },
@@ -246,6 +280,7 @@ $InventoryApps = @(
         Name = "Microsoft Report Builder"
 
         Matches = @(
+
             "Microsoft Report Builder*"
         )
     },
@@ -254,6 +289,7 @@ $InventoryApps = @(
         Name = "Microsoft SQL Server 2012 Native Client"
 
         Matches = @(
+
             "Microsoft SQL Server 2012 Native Client*"
         )
     },
@@ -262,6 +298,7 @@ $InventoryApps = @(
         Name = "Microsoft SQL Server Management Studio"
 
         Matches = @(
+
             "Microsoft SQL Server Management Studio*"
         )
     },
@@ -270,7 +307,9 @@ $InventoryApps = @(
         Name = "Microsoft Visio - en-us"
 
         Matches = @(
+
             "Microsoft Visio - en-us*",
+
             "Microsoft Visio*"
         )
     },
@@ -279,6 +318,7 @@ $InventoryApps = @(
         Name = "Microsoft Visual Studio 2010 Tools for Office Runtime"
 
         Matches = @(
+
             "Microsoft Visual Studio 2010 Tools for Office Runtime*"
         )
     },
@@ -287,7 +327,9 @@ $InventoryApps = @(
         Name = "SunSystems 6.4.0"
 
         Matches = @(
+
             "SunSystems 6.4.0*",
+
             "SunSystems*"
         )
     },
@@ -296,36 +338,50 @@ $InventoryApps = @(
         Name = "Git"
 
         Matches = @(
-            "Git",
-            "Git version*"
+
+            "Git"
         )
     }
 )
 
 # ============================================================
-# FUNCTIONS
+# FUNCTION:
+# Convert registry installation date
 # ============================================================
 
 function Convert-InstallDate {
 
-    param(
+    param (
+
         [string]$InstallDate
     )
 
-    if ([string]::IsNullOrWhiteSpace($InstallDate)) {
+    if (
+
+        [string]::IsNullOrWhiteSpace(
+            $InstallDate
+        )
+    ) {
 
         return "Unknown"
     }
 
-    # Standard uninstall registry format = yyyyMMdd
+    # --------------------------------------------------------
+    # Most uninstall registry entries use YYYYMMDD
+    # --------------------------------------------------------
+
     if ($InstallDate -match '^\d{8}$') {
 
         try {
 
             return [datetime]::ParseExact(
+
                 $InstallDate,
+
                 "yyyyMMdd",
+
                 [System.Globalization.CultureInfo]::InvariantCulture
+
             ).ToString("dd/MM/yyyy")
         }
         catch {
@@ -334,9 +390,15 @@ function Convert-InstallDate {
         }
     }
 
+    # --------------------------------------------------------
+    # Attempt to parse any other valid Windows date
+    # --------------------------------------------------------
+
     try {
 
-        return ([datetime]$InstallDate).ToString("dd/MM/yyyy")
+        return ([datetime]$InstallDate).ToString(
+            "dd/MM/yyyy"
+        )
     }
     catch {
 
@@ -345,12 +407,14 @@ function Convert-InstallDate {
 }
 
 # ============================================================
-# HTML ENCODING
+# FUNCTION:
+# HTML encoding
 # ============================================================
 
 function HtmlEncode {
 
-    param(
+    param (
+
         [object]$Text
     )
 
@@ -360,12 +424,19 @@ function HtmlEncode {
     }
 
     return [System.Net.WebUtility]::HtmlEncode(
+
         [string]$Text
     )
 }
 
 # ============================================================
-# GET INSTALLED APPLICATIONS
+# FUNCTION:
+# Get installed applications
+#
+# Reads BOTH:
+#
+# 64-bit uninstall registry
+# 32-bit uninstall registry
 # ============================================================
 
 function Get-InstalledApplications {
@@ -381,22 +452,141 @@ function Get-InstalledApplications {
 
     foreach ($RegistryPath in $RegistryLocations) {
 
-        $Apps = Get-ItemProperty `
-            -Path $RegistryPath `
-            -ErrorAction SilentlyContinue |
+        $Apps = @(
+
+            Get-ItemProperty `
+                -Path $RegistryPath `
+                -ErrorAction SilentlyContinue |
+
             Where-Object {
 
                 -not [string]::IsNullOrWhiteSpace(
                     $_.DisplayName
                 )
             }
+        )
 
         foreach ($App in $Apps) {
 
-            $ConvertedDate = Convert-InstallDate `
-                $App.InstallDate
-
             $Results += [PSCustomObject]@{
+
+                DisplayName = [string]$App.DisplayName
+
+                DisplayVersion = [string]$App.DisplayVersion
+
+                Publisher = [string]$App.Publisher
+
+                InstallDate = Convert-InstallDate `
+                    $App.InstallDate
+
+                RawInstallDate = [string]$App.InstallDate
+
+                RegistryPath = [string]$App.PSPath
+            }
+        }
+    }
+
+    return @($Results)
+}
+
+# ============================================================
+# FUNCTION:
+# Find ONE best matching application
+#
+# This prevents duplicate rows.
+#
+# Preference:
+#
+# 1. Has a real install date
+# 2. Has a version
+# 3. Matches the most specific pattern first
+#
+# Only Select-Object -First 1 is returned.
+# ============================================================
+
+function Find-BestApplication {
+
+    param (
+
+        [array]$InstalledApps,
+
+        [array]$Patterns
+    )
+
+    $Candidates = @()
+
+    # --------------------------------------------------------
+    # Process patterns in configured priority order
+    # --------------------------------------------------------
+
+    for (
+
+        $PatternNumber = 0;
+
+        $PatternNumber -lt $Patterns.Count;
+
+        $PatternNumber++
+    ) {
+
+        $Pattern = $Patterns[$PatternNumber]
+
+        $Found = @(
+
+            $InstalledApps |
+
+            Where-Object {
+
+                $_ -ne $null -and
+
+                -not [string]::IsNullOrWhiteSpace(
+                    $_.DisplayName
+                ) -and
+
+                $_.DisplayName -like $Pattern
+            }
+        )
+
+        foreach ($App in $Found) {
+
+            # ------------------------------------------------
+            # Determine if this record has a usable date
+            # ------------------------------------------------
+
+            $HasInstallDate = 0
+
+            if (
+
+                -not [string]::IsNullOrWhiteSpace(
+                    $App.InstallDate
+                ) -and
+
+                $App.InstallDate -ne "Unknown"
+            ) {
+
+                $HasInstallDate = 1
+            }
+
+            # ------------------------------------------------
+            # Determine if this record has a version
+            # ------------------------------------------------
+
+            $HasVersion = 0
+
+            if (
+
+                -not [string]::IsNullOrWhiteSpace(
+                    $App.DisplayVersion
+                )
+            ) {
+
+                $HasVersion = 1
+            }
+
+            # ------------------------------------------------
+            # Store candidate
+            # ------------------------------------------------
+
+            $Candidates += [PSCustomObject]@{
 
                 DisplayName = $App.DisplayName
 
@@ -404,182 +594,122 @@ function Get-InstalledApplications {
 
                 Publisher = $App.Publisher
 
-                InstallDate = $ConvertedDate
+                InstallDate = $App.InstallDate
 
-                RawInstallDate = $App.InstallDate
+                RawInstallDate = $App.RawInstallDate
 
-                RegistryPath = $App.PSPath
+                RegistryPath = $App.RegistryPath
+
+                PatternNumber = $PatternNumber
+
+                HasInstallDate = $HasInstallDate
+
+                HasVersion = $HasVersion
             }
         }
     }
 
-    return $Results
-}
+    # --------------------------------------------------------
+    # No match
+    # --------------------------------------------------------
 
-# ============================================================
-# FIND APPLICATION
-#
-# IMPORTANT:
-# Duplicate entries for the same version are grouped together.
-#
-# Preference is:
-#
-#   1. Entry with a proper install date
-#   2. First matching name/pattern
-#
-# This fixes the duplicate Power BI issue and also allows us
-# to favour the dated Microsoft 365 registry entry.
-# ============================================================
+    if ($Candidates.Count -eq 0) {
 
-function Find-Application {
-
-    param(
-
-        [array]$InstalledApps,
-
-        [array]$Patterns
-    )
-
-    $Matches = @()
-
-    # Patterns are processed in preference order
-    foreach ($Pattern in $Patterns) {
-
-        $Found = @(
-            $InstalledApps |
-                Where-Object {
-
-                    $_.DisplayName -like $Pattern
-                }
-        )
-
-        if ($Found.Count -gt 0) {
-
-            foreach ($Item in $Found) {
-
-                # Record which pattern preference located it
-                $PatternIndex = [array]::IndexOf(
-                    $Patterns,
-                    $Pattern
-                )
-
-                $Matches += [PSCustomObject]@{
-
-                    DisplayName    = $Item.DisplayName
-                    DisplayVersion = $Item.DisplayVersion
-                    Publisher      = $Item.Publisher
-                    InstallDate    = $Item.InstallDate
-                    RawInstallDate = $Item.RawInstallDate
-                    RegistryPath   = $Item.RegistryPath
-                    PatternIndex   = $PatternIndex
-                }
-            }
-        }
+        return $null
     }
 
-    if ($Matches.Count -eq 0) {
+    # --------------------------------------------------------
+    # Remove completely identical candidate records
+    # --------------------------------------------------------
 
-        return @()
-    }
+    $Candidates = @(
 
-    # Remove exact registry duplicates first
-    $Matches = @(
-        $Matches |
-            Sort-Object `
-                DisplayName,
-                DisplayVersion,
-                InstallDate `
-                -Unique
+        $Candidates |
+
+        Sort-Object `
+
+            DisplayName,
+
+            DisplayVersion,
+
+            InstallDate `
+
+            -Unique
     )
 
     # --------------------------------------------------------
-    # Group entries by VERSION.
+    # Select exactly ONE best result.
     #
-    # Power BI example:
-    #
-    # Microsoft Power BI Desktop (x64)
-    # Microsoft PowerBI Desktop (x64)
-    #
-    # Same version = treat as same application.
-    #
-    # Prefer the entry that has a real install date.
+    # Install date gets highest priority.
     # --------------------------------------------------------
 
-    $Deduplicated = @()
+    $Best = $Candidates |
 
-    $VersionGroups = $Matches |
-        Group-Object {
+        Sort-Object `
 
-            if (
-                [string]::IsNullOrWhiteSpace(
-                    $_.DisplayVersion
-                )
-            ) {
+            @{
 
-                "__NOVERSION__$($_.DisplayName)"
-            }
-            else {
+                Expression = {
 
-                $_.DisplayVersion
-            }
-        }
+                    $_.HasInstallDate
+                }
 
-    foreach ($Group in $VersionGroups) {
+                Descending = $true
+            },
 
-        $Preferred = $Group.Group |
-            Sort-Object `
+            @{
 
-                @{
-                    Expression = {
+                Expression = {
 
-                        if (
-                            $_.InstallDate -and
-                            $_.InstallDate -ne "Unknown"
-                        ) {
+                    $_.HasVersion
+                }
 
-                            0
-                        }
-                        else {
+                Descending = $true
+            },
 
-                            1
-                        }
-                    }
-                },
+            @{
 
-                @{
-                    Expression = {
+                Expression = {
 
-                        $_.PatternIndex
-                    }
-                },
+                    $_.PatternNumber
+                }
 
-                @{
-                    Expression = {
+                Descending = $false
+            },
 
-                        $_.DisplayName
-                    }
-                } |
+            @{
 
-            Select-Object -First 1
+                Expression = {
 
-        $Deduplicated += $Preferred
-    }
+                    $_.DisplayName
+                }
 
-    return $Deduplicated
+                Descending = $false
+            } |
+
+        Select-Object -First 1
+
+    return $Best
 }
 
 # ============================================================
-# TEST CURRENT MONTH
+# FUNCTION:
+# Test whether application was updated this month
 # ============================================================
 
 function Test-CurrentMonth {
 
-    param(
+    param (
+
         [string]$Date
     )
 
     if (
-        [string]::IsNullOrWhiteSpace($Date) -or
+
+        [string]::IsNullOrWhiteSpace(
+            $Date
+        ) -or
+
         $Date -eq "Unknown"
     ) {
 
@@ -589,68 +719,76 @@ function Test-CurrentMonth {
     try {
 
         $ParsedDate = [datetime]::ParseExact(
+
             $Date,
+
             "dd/MM/yyyy",
+
             [System.Globalization.CultureInfo]::InvariantCulture
         )
 
-        if (
-            $ParsedDate.Month -eq $Now.Month -and
-            $ParsedDate.Year -eq $Now.Year
-        ) {
+        return (
 
-            return $true
-        }
+            $ParsedDate.Month -eq $Now.Month -and
+
+            $ParsedDate.Year -eq $Now.Year
+        )
     }
     catch {
 
         return $false
     }
-
-    return $false
 }
 
 # ============================================================
-# CONSOLE HEADER
+# START
 # ============================================================
 
 Write-Host ""
-Write-Host "===============================================" `
+
+Write-Host `
+    "===============================================" `
     -ForegroundColor Cyan
 
-Write-Host " AVD APPLICATION REPORT" `
+Write-Host `
+    " AVD MASTER IMAGE APPLICATION REPORT" `
     -ForegroundColor Cyan
 
-Write-Host "===============================================" `
+Write-Host `
+    "===============================================" `
     -ForegroundColor Cyan
 
 Write-Host ""
 
 Write-Host "Computer : $ComputerName"
+
 Write-Host "Period   : $MonthName"
 
 Write-Host ""
 
 # ============================================================
-# COLLECT APPLICATION DATA
+# COLLECT APPLICATION INVENTORY
 # ============================================================
 
-Write-Host "Collecting installed applications..." `
+Write-Host `
+    "Collecting installed application information..." `
     -ForegroundColor Yellow
 
 $InstalledApps = @(
+
     Get-InstalledApplications
 )
 
 Write-Host `
-    "Applications discovered: $($InstalledApps.Count)" `
+    "Registry application entries found: $($InstalledApps.Count)" `
     -ForegroundColor Green
 
 # ============================================================
-# OS INFORMATION
+# OPERATING SYSTEM INFORMATION
 # ============================================================
 
-Write-Host "Collecting Windows information..." `
+Write-Host `
+    "Collecting operating system information..." `
     -ForegroundColor Yellow
 
 $OS = Get-CimInstance `
@@ -674,30 +812,30 @@ $OSInfo = [PSCustomObject]@{
 }
 
 # ============================================================
-# WINDOWS UPDATE HISTORY
+# WINDOWS UPDATE INFORMATION
 # ============================================================
+
+Write-Host `
+    "Collecting Windows Update information..." `
+    -ForegroundColor Yellow
 
 $RecentUpdates = @()
 
 try {
 
-    $HotFixes = Get-HotFix |
-        Sort-Object InstalledOn -Descending
+    $RecentUpdates = @(
 
-    foreach ($HotFix in $HotFixes) {
+        Get-HotFix |
 
-        if ($HotFix.InstalledOn) {
+        Where-Object {
 
-            $RecentUpdates += [PSCustomObject]@{
+            $_.InstalledOn
+        } |
 
-                HotFixID = $HotFix.HotFixID
-
-                Description = $HotFix.Description
-
-                InstalledOn = $HotFix.InstalledOn
-            }
-        }
-    }
+        Sort-Object `
+            InstalledOn `
+            -Descending
+    )
 }
 catch {
 
@@ -707,69 +845,84 @@ catch {
 
 # ============================================================
 # CORE APPLICATION UPDATE STATUS
+#
+# GUARANTEED:
+# ONE row per configured application.
 # ============================================================
 
 Write-Host `
-    "Building core application update status..." `
+    "Building Core Application Update Status..." `
     -ForegroundColor Yellow
 
 $CoreResults = @()
 
 foreach ($Definition in $CoreApplications) {
 
-    $Matches = @(
-        Find-Application `
-            -InstalledApps $InstalledApps `
-            -Patterns $Definition.Matches
-    )
+    # --------------------------------------------------------
+    # Get only ONE best match
+    # --------------------------------------------------------
 
-    if ($Matches.Count -gt 0) {
+    $Match = Find-BestApplication `
+        -InstalledApps $InstalledApps `
+        -Patterns $Definition.Matches
 
-        foreach ($Match in $Matches) {
+    if ($null -ne $Match) {
 
-            $UpdatedThisMonth = Test-CurrentMonth `
+        # ----------------------------------------------------
+        # Determine status
+        # ----------------------------------------------------
+
+        if (
+
+            Test-CurrentMonth `
                 $Match.InstallDate
+        ) {
 
-            if ($UpdatedThisMonth) {
+            $Status = "Updated this month"
+        }
+        else {
 
-                $Status = "Updated this month"
-            }
-            else {
+            $Status = "Latest version already installed"
+        }
 
-                # User-requested wording.
-                #
-                # This indicates the required application is
-                # already present even where Windows does not
-                # expose a usable update date.
-                $Status = "Latest version already installed"
-            }
+        # ----------------------------------------------------
+        # Version
+        # ----------------------------------------------------
 
-            $CoreResults += [PSCustomObject]@{
+        $Version = $Match.DisplayVersion
 
-                Application = $Definition.Name
+        if (
 
-                InstalledName = $Match.DisplayName
+            [string]::IsNullOrWhiteSpace(
+                $Version
+            )
+        ) {
 
-                Version = if (
-                    [string]::IsNullOrWhiteSpace(
-                        $Match.DisplayVersion
-                    )
-                ) {
+            $Version = "Unknown"
+        }
 
-                    "Unknown"
-                }
-                else {
+        # ----------------------------------------------------
+        # Add ONE row only
+        # ----------------------------------------------------
 
-                    $Match.DisplayVersion
-                }
+        $CoreResults += [PSCustomObject]@{
 
-                InstallDate = $Match.InstallDate
+            Application = $Definition.Name
 
-                Status = $Status
-            }
+            InstalledName = $Match.DisplayName
+
+            Version = $Version
+
+            InstallDate = $Match.InstallDate
+
+            Status = $Status
         }
     }
     else {
+
+        # ----------------------------------------------------
+        # Application missing
+        # ----------------------------------------------------
 
         $CoreResults += [PSCustomObject]@{
 
@@ -788,45 +941,44 @@ foreach ($Definition in $CoreApplications) {
 
 # ============================================================
 # APPLICATION INVENTORY
+#
+# GUARANTEED:
+# ONE row per configured inventory application.
 # ============================================================
 
 Write-Host `
-    "Building application inventory..." `
+    "Building Application Inventory..." `
     -ForegroundColor Yellow
 
 $InventoryResults = @()
 
 foreach ($Definition in $InventoryApps) {
 
-    $Matches = @(
-        Find-Application `
-            -InstalledApps $InstalledApps `
-            -Patterns $Definition.Matches
-    )
+    $Match = Find-BestApplication `
+        -InstalledApps $InstalledApps `
+        -Patterns $Definition.Matches
 
-    if ($Matches.Count -gt 0) {
+    if ($null -ne $Match) {
 
-        foreach ($Match in $Matches) {
+        $Version = $Match.DisplayVersion
 
-            $InventoryResults += [PSCustomObject]@{
+        if (
 
-                ApplicationName = $Match.DisplayName
+            [string]::IsNullOrWhiteSpace(
+                $Version
+            )
+        ) {
 
-                Version = if (
-                    [string]::IsNullOrWhiteSpace(
-                        $Match.DisplayVersion
-                    )
-                ) {
+            $Version = "Unknown"
+        }
 
-                    "Unknown"
-                }
-                else {
+        $InventoryResults += [PSCustomObject]@{
 
-                    $Match.DisplayVersion
-                }
+            ApplicationName = $Match.DisplayName
 
-                InstallDate = $Match.InstallDate
-            }
+            Version = $Version
+
+            InstallDate = $Match.InstallDate
         }
     }
     else {
@@ -847,17 +999,31 @@ foreach ($Definition in $InventoryApps) {
 # ============================================================
 
 Write-Host `
-    "Looking for other applications installed or updated this month..." `
+    "Finding other applications installed or updated this month..." `
     -ForegroundColor Yellow
 
 $OtherApplications = @()
 
 foreach ($App in $InstalledApps) {
 
-    if (-not (Test-CurrentMonth $App.InstallDate)) {
+    # --------------------------------------------------------
+    # Only applications updated this month
+    # --------------------------------------------------------
+
+    if (
+
+        -not (
+            Test-CurrentMonth `
+                $App.InstallDate
+        )
+    ) {
 
         continue
     }
+
+    # --------------------------------------------------------
+    # Determine whether it is already in Core Applications
+    # --------------------------------------------------------
 
     $IsCoreApplication = $false
 
@@ -865,7 +1031,10 @@ foreach ($App in $InstalledApps) {
 
         foreach ($Pattern in $Definition.Matches) {
 
-            if ($App.DisplayName -like $Pattern) {
+            if (
+
+                $App.DisplayName -like $Pattern
+            ) {
 
                 $IsCoreApplication = $true
 
@@ -879,25 +1048,29 @@ foreach ($App in $InstalledApps) {
         }
     }
 
-    # Do not repeat applications already shown in Core table
+    # --------------------------------------------------------
+    # Do not repeat Core applications here
+    # --------------------------------------------------------
+
     if (-not $IsCoreApplication) {
+
+        $Version = $App.DisplayVersion
+
+        if (
+
+            [string]::IsNullOrWhiteSpace(
+                $Version
+            )
+        ) {
+
+            $Version = "Unknown"
+        }
 
         $OtherApplications += [PSCustomObject]@{
 
             Application = $App.DisplayName
 
-            Version = if (
-                [string]::IsNullOrWhiteSpace(
-                    $App.DisplayVersion
-                )
-            ) {
-
-                "Unknown"
-            }
-            else {
-
-                $App.DisplayVersion
-            }
+            Version = $Version
 
             Publisher = $App.Publisher
 
@@ -906,21 +1079,27 @@ foreach ($App in $InstalledApps) {
     }
 }
 
-# ------------------------------------------------------------
-# Remove duplicate entries from Other Applications
-# ------------------------------------------------------------
+# ============================================================
+# REMOVE DUPLICATES FROM OTHER APPLICATIONS
+# ============================================================
 
 $OtherApplications = @(
+
     $OtherApplications |
-        Sort-Object `
-            Application,
-            Version,
-            InstallDate `
-            -Unique
+
+    Sort-Object `
+
+        Application,
+
+        Version,
+
+        InstallDate `
+
+        -Unique
 )
 
 # ============================================================
-# CSV OUTPUT
+# CSV OUTPUT PATHS
 # ============================================================
 
 $Prefix = "$ComputerName-$DateStamp"
@@ -945,126 +1124,173 @@ $OtherAppsCSV = Join-Path `
     $LocalMonthFolder `
     "$Prefix-OtherApplications.csv"
 
+# ============================================================
+# EXPORT CSV FILES
+# ============================================================
+
 $CoreResults |
-    Export-Csv `
-        -Path $CoreStatusCSV `
-        -NoTypeInformation `
-        -Encoding UTF8
+
+Export-Csv `
+    -Path $CoreStatusCSV `
+    -NoTypeInformation `
+    -Encoding UTF8
 
 $InventoryResults |
-    Export-Csv `
-        -Path $InventoryCSV `
-        -NoTypeInformation `
-        -Encoding UTF8
+
+Export-Csv `
+    -Path $InventoryCSV `
+    -NoTypeInformation `
+    -Encoding UTF8
 
 $OSInfo |
-    Export-Csv `
-        -Path $OSInfoCSV `
-        -NoTypeInformation `
-        -Encoding UTF8
+
+Export-Csv `
+    -Path $OSInfoCSV `
+    -NoTypeInformation `
+    -Encoding UTF8
 
 $RecentUpdates |
-    Export-Csv `
-        -Path $OSUpdatesCSV `
-        -NoTypeInformation `
-        -Encoding UTF8
+
+Export-Csv `
+    -Path $OSUpdatesCSV `
+    -NoTypeInformation `
+    -Encoding UTF8
 
 $OtherApplications |
-    Export-Csv `
-        -Path $OtherAppsCSV `
-        -NoTypeInformation `
-        -Encoding UTF8
+
+Export-Csv `
+    -Path $OtherAppsCSV `
+    -NoTypeInformation `
+    -Encoding UTF8
 
 # ============================================================
-# OPERATING SYSTEM HTML
+# BUILD OS HTML TABLE
 # ============================================================
 
 $OSHtml = @"
 <table>
 
 <tr>
-    <th>Computer Name</th>
-    <th>Operating System</th>
-    <th>Version</th>
-    <th>Build</th>
-    <th>Architecture</th>
-    <th>Last Boot</th>
+
+<th>Computer Name</th>
+
+<th>Operating System</th>
+
+<th>Version</th>
+
+<th>Build</th>
+
+<th>Architecture</th>
+
+<th>Last Boot</th>
+
 </tr>
 
 <tr>
-    <td>$(HtmlEncode $OSInfo.ComputerName)</td>
-    <td>$(HtmlEncode $OSInfo.OS)</td>
-    <td>$(HtmlEncode $OSInfo.Version)</td>
-    <td>$(HtmlEncode $OSInfo.Build)</td>
-    <td>$(HtmlEncode $OSInfo.Architecture)</td>
-    <td>$(HtmlEncode $OSInfo.LastBootTime)</td>
+
+<td>$(HtmlEncode $OSInfo.ComputerName)</td>
+
+<td>$(HtmlEncode $OSInfo.OS)</td>
+
+<td>$(HtmlEncode $OSInfo.Version)</td>
+
+<td>$(HtmlEncode $OSInfo.Build)</td>
+
+<td>$(HtmlEncode $OSInfo.Architecture)</td>
+
+<td>$(HtmlEncode $OSInfo.LastBootTime)</td>
+
 </tr>
 
 </table>
 "@
 
 # ============================================================
-# WINDOWS UPDATE HTML
+# BUILD WINDOWS UPDATE HTML
 # ============================================================
 
 $UpdateHtml = @"
 <table>
 
 <tr>
-    <th>KB</th>
-    <th>Description</th>
-    <th>Installed On</th>
+
+<th>KB</th>
+
+<th>Description</th>
+
+<th>Installed On</th>
+
 </tr>
 "@
 
-$RecentUpdates |
-    Select-Object -First 10 |
-    ForEach-Object {
+foreach (
 
-        $UpdateClass = ""
+    $Update in (
 
-        if (
-            $_.InstalledOn.Month -eq $Now.Month -and
-            $_.InstalledOn.Year -eq $Now.Year
-        ) {
+        $RecentUpdates |
 
-            $UpdateClass = "good"
-        }
+        Select-Object -First 10
+    )
+) {
 
-        $UpdateHtml += @"
+    $UpdateClass = ""
+
+    if (
+
+        $Update.InstalledOn.Month -eq $Now.Month -and
+
+        $Update.InstalledOn.Year -eq $Now.Year
+    ) {
+
+        $UpdateClass = "good"
+    }
+
+    $UpdateHtml += @"
 <tr>
 
-    <td>
-        $(HtmlEncode $_.HotFixID)
-    </td>
+<td>
 
-    <td>
-        $(HtmlEncode $_.Description)
-    </td>
+$(HtmlEncode $Update.HotFixID)
 
-    <td class="$UpdateClass">
-        $($_.InstalledOn.ToString("dd/MM/yyyy"))
-    </td>
+</td>
+
+<td>
+
+$(HtmlEncode $Update.Description)
+
+</td>
+
+<td class="$UpdateClass">
+
+$($Update.InstalledOn.ToString("dd/MM/yyyy"))
+
+</td>
 
 </tr>
 "@
-    }
+}
 
 $UpdateHtml += "</table>"
 
 # ============================================================
-# CORE APPLICATION UPDATE STATUS HTML
+# BUILD CORE APPLICATION UPDATE STATUS HTML
 # ============================================================
 
 $CoreHtml = @"
 <table>
 
 <tr>
-    <th>Application</th>
-    <th>Installed Name</th>
-    <th>Version</th>
-    <th>Install / Update Date</th>
-    <th>Status</th>
+
+<th>Application</th>
+
+<th>Installed Name</th>
+
+<th>Version</th>
+
+<th>Install / Update Date</th>
+
+<th>Status</th>
+
 </tr>
 "@
 
@@ -1096,25 +1322,35 @@ foreach ($App in $CoreResults) {
     $CoreHtml += @"
 <tr>
 
-    <td>
-        $(HtmlEncode $App.Application)
-    </td>
+<td>
 
-    <td>
-        $(HtmlEncode $App.InstalledName)
-    </td>
+$(HtmlEncode $App.Application)
 
-    <td>
-        $(HtmlEncode $App.Version)
-    </td>
+</td>
 
-    <td>
-        $(HtmlEncode $App.InstallDate)
-    </td>
+<td>
 
-    <td class="$StatusClass">
-        $(HtmlEncode $App.Status)
-    </td>
+$(HtmlEncode $App.InstalledName)
+
+</td>
+
+<td>
+
+$(HtmlEncode $App.Version)
+
+</td>
+
+<td>
+
+$(HtmlEncode $App.InstallDate)
+
+</td>
+
+<td class="$StatusClass">
+
+$(HtmlEncode $App.Status)
+
+</td>
 
 </tr>
 "@
@@ -1123,7 +1359,7 @@ foreach ($App in $CoreResults) {
 $CoreHtml += "</table>"
 
 # ============================================================
-# OTHER APPLICATIONS HTML
+# BUILD OTHER APPLICATIONS HTML
 # ============================================================
 
 if ($OtherApplications.Count -gt 0) {
@@ -1132,10 +1368,15 @@ if ($OtherApplications.Count -gt 0) {
 <table>
 
 <tr>
-    <th>Application</th>
-    <th>Version</th>
-    <th>Publisher</th>
-    <th>Install / Update Date</th>
+
+<th>Application</th>
+
+<th>Version</th>
+
+<th>Publisher</th>
+
+<th>Install / Update Date</th>
+
 </tr>
 "@
 
@@ -1144,21 +1385,29 @@ if ($OtherApplications.Count -gt 0) {
         $OtherAppsHtml += @"
 <tr>
 
-    <td>
-        $(HtmlEncode $App.Application)
-    </td>
+<td>
 
-    <td>
-        $(HtmlEncode $App.Version)
-    </td>
+$(HtmlEncode $App.Application)
 
-    <td>
-        $(HtmlEncode $App.Publisher)
-    </td>
+</td>
 
-    <td class="good">
-        $(HtmlEncode $App.InstallDate)
-    </td>
+<td>
+
+$(HtmlEncode $App.Version)
+
+</td>
+
+<td>
+
+$(HtmlEncode $App.Publisher)
+
+</td>
+
+<td class="good">
+
+$(HtmlEncode $App.InstallDate)
+
+</td>
 
 </tr>
 "@
@@ -1171,30 +1420,36 @@ else {
     $OtherAppsHtml = @"
 <div class="info">
 
-No additional applications were detected as installed or
-updated during $MonthName.
+No additional applications were detected as installed or updated during $MonthName.
 
 </div>
 "@
 }
 
 # ============================================================
-# APPLICATION INVENTORY HTML
+# BUILD APPLICATION INVENTORY HTML
 # ============================================================
 
 $InventoryHtml = @"
 <table>
 
 <tr>
-    <th>Application Name</th>
-    <th>Version</th>
-    <th>Install Date</th>
+
+<th>Application Name</th>
+
+<th>Version</th>
+
+<th>Install Date</th>
+
 </tr>
 "@
 
 foreach ($App in $InventoryResults) {
 
-    if ($App.Version -eq "Not Installed") {
+    if (
+
+        $App.Version -eq "Not Installed"
+    ) {
 
         $RowClass = "notinstalled"
     }
@@ -1206,17 +1461,23 @@ foreach ($App in $InventoryResults) {
     $InventoryHtml += @"
 <tr class="$RowClass">
 
-    <td>
-        $(HtmlEncode $App.ApplicationName)
-    </td>
+<td>
 
-    <td>
-        $(HtmlEncode $App.Version)
-    </td>
+$(HtmlEncode $App.ApplicationName)
 
-    <td>
-        $(HtmlEncode $App.InstallDate)
-    </td>
+</td>
+
+<td>
+
+$(HtmlEncode $App.Version)
+
+</td>
+
+<td>
+
+$(HtmlEncode $App.InstallDate)
+
+</td>
 
 </tr>
 "@
@@ -1245,10 +1506,7 @@ AVD Application Report - $ComputerName
 
 body {
 
-    font-family:
-        "Segoe UI",
-        Arial,
-        sans-serif;
+    font-family: "Segoe UI", Arial, sans-serif;
 
     background-color: #f4f6f8;
 
@@ -1379,16 +1637,6 @@ tr:hover {
     font-weight: 600;
 }
 
-.warning {
-
-    background-color:
-        #fff3cd !important;
-
-    color: #856404;
-
-    font-weight: 600;
-}
-
 .bad {
 
     background-color:
@@ -1449,26 +1697,25 @@ Generated: $RunTime
 <div class="summary">
 
 <strong>Server:</strong>
+
 $ComputerName
 
 <br>
 
 <strong>Reporting Period:</strong>
+
 $MonthName
 
 <br>
 
-<strong>Installed Applications Detected:</strong>
-$($InstalledApps.Count)
-
-<br>
-
 <strong>Core Applications:</strong>
+
 $($CoreApplications.Count)
 
 <br>
 
 <strong>Inventory Applications:</strong>
+
 $($InventoryApps.Count)
 
 </div>
@@ -1506,14 +1753,6 @@ $OtherAppsHtml
 5. Application Inventory
 </h2>
 
-<p>
-
-The table below shows the currently installed
-version and installation/update date for the
-specifically tracked business applications.
-
-</p>
-
 $InventoryHtml
 
 
@@ -1533,7 +1772,7 @@ Generated $RunTime
 "@
 
 # ============================================================
-# WRITE HTML REPORT
+# SAVE HTML REPORT
 # ============================================================
 
 $HtmlFileName = `
@@ -1544,16 +1783,19 @@ $LocalHtml = Join-Path `
     $HtmlFileName
 
 $HtmlReport |
-    Out-File `
-        -FilePath $LocalHtml `
-        -Encoding UTF8 `
-        -Force
+
+Out-File `
+    -FilePath $LocalHtml `
+    -Encoding UTF8 `
+    -Force
 
 # ============================================================
-# COPY OUTPUT TO NETWORK SHARE
+# COPY FILES TO NETWORK SHARE
 # ============================================================
 
 if ($ShareAvailable) {
+
+    Write-Host ""
 
     Write-Host `
         "Copying reports to network share..." `
@@ -1593,7 +1835,7 @@ if ($ShareAvailable) {
 }
 
 # ============================================================
-# CONSOLE SUMMARY
+# FINISH
 # ============================================================
 
 Write-Host ""
@@ -1621,15 +1863,7 @@ Write-Host `
     -ForegroundColor Cyan
 
 Write-Host `
-    "Applications discovered:" `
-    -NoNewline
-
-Write-Host `
-    " $($InstalledApps.Count)" `
-    -ForegroundColor Cyan
-
-Write-Host `
-    "Core applications tracked:" `
+    "Core applications:" `
     -NoNewline
 
 Write-Host `
@@ -1637,7 +1871,7 @@ Write-Host `
     -ForegroundColor Cyan
 
 Write-Host `
-    "Inventory applications tracked:" `
+    "Inventory applications:" `
     -NoNewline
 
 Write-Host `
