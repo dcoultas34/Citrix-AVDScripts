@@ -1,626 +1,1236 @@
-param(
-  [switch]$Upgrade,                 # perform upgrades (installed apps only)
-  [switch]$IncludeWindowsUpdate,    # try OS updates (requires PSWindowsUpdate)
-  [switch]$WindowsUpdateOnly,       # do only Windows Updates, skip app upgrades
-  [switch]$WhatIf,                  # dry-run the actions
-  [switch]$NoHtml,                  # never write/open the HTML report
-  [switch]$HtmlOnlyWhenGreen,       # write/open HTML only when all installed apps are green
-  [switch]$NoCsv,                   # skip CSV export
-  [switch]$NoReports,               # shorthand: implies -NoCsv and -NoHtml
-  [switch]$DisableMsStore           # disable 'msstore' source in winget for this session/user
-)
+<#
+.SYNOPSIS
+    AVD Master Image Application / Patching Report
 
-# Shorthand
-if ($NoReports) { $NoCsv = $true; $NoHtml = $true }
+.DESCRIPTION
+    Creates an HTML report containing:
 
-<# =======================
-   Apps to check / update
-   ======================= #>
+      1. Server / OS Information
+      2. Application Patching Status
+      3. Application Inventory
+      4. Other Applications Installed / Updated This Month
+
+    Designed for:
+        CUK-AVDGI-P-001
+        CUK-AVDGI-P-002
+
+    Output:
+        C:\Ultima\AVDPatchReports\<Month Year>
+        \\transfer\transfer\Citrixapps\AV\<Month Year>
+
+.NOTES
+    Application install dates are obtained from the Windows
+    uninstall registry where available.
+
+    Some applications do not populate InstallDate.
+#>
+
+[CmdletBinding()]
+param()
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+$ComputerName = $env:COMPUTERNAME
+$Now          = Get-Date
+$MonthName    = $Now.ToString("MMMM yyyy")
+$DateStamp    = $Now.ToString("yyyy-MM-dd")
+$RunTime      = $Now.ToString("dd/MM/yyyy HH:mm")
+
+# ------------------------------------------------------------
+# Master Images
+# ------------------------------------------------------------
+
+$MasterImages = @{
+    "CUK-AVDGI-P-001" = "AVD Master Image 001"
+    "CUK-AVDGI-P-002" = "AVD Master Image 002"
+}
+
+# ------------------------------------------------------------
+# Output locations
+# ------------------------------------------------------------
+
+$LocalRoot = "C:\Ultima\AVDPatchReports"
+$ShareRoot = "\\transfer\transfer\Citrixapps\AV"
+
+$LocalMonthFolder = Join-Path $LocalRoot $MonthName
+$ShareMonthFolder = Join-Path $ShareRoot $MonthName
+
+# Create local folder
+if (-not (Test-Path $LocalMonthFolder)) {
+    New-Item `
+        -Path $LocalMonthFolder `
+        -ItemType Directory `
+        -Force | Out-Null
+}
+
+# Try to create share folder
+$ShareAvailable = $false
+
+try {
+
+    if (-not (Test-Path $ShareMonthFolder)) {
+
+        New-Item `
+            -Path $ShareMonthFolder `
+            -ItemType Directory `
+            -Force `
+            -ErrorAction Stop | Out-Null
+    }
+
+    $ShareAvailable = $true
+}
+catch {
+
+    Write-Warning "Unable to access reporting share: $ShareMonthFolder"
+    Write-Warning $_.Exception.Message
+}
+
+# ============================================================
+# APPLICATIONS IN MAIN PATCHING TABLE
+# ============================================================
+
 $AppsToCheck = @(
-    @{ Name="Windows Updates";         LocalMatch="__WINDOWS_UPDATE__";           LatestProvider="None";      EvergreenName=$null;                       WingetId=$null }
 
-    @{ Name="Microsoft Office 365";    LocalMatch="__OFFICE_C2R__";               LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Microsoft.Office" }
+    @{
+        Name    = "Microsoft 365 Apps"
+        Matches = @(
+            "Microsoft 365 Apps*"
+        )
+    },
 
-    # Evergreen-first (vendor data), winget fallback
-    @{ Name="Google Chrome";           LocalMatch="Google Chrome";                LatestProvider="Evergreen"; EvergreenName="GoogleChrome";              WingetId="Google.Chrome" }
-    @{ Name="Microsoft Edge";          LocalMatch="Microsoft Edge";               LatestProvider="Evergreen"; EvergreenName="MicrosoftEdge";              WingetId="Microsoft.Edge" }
-    @{ Name="Visual Studio Code";      LocalMatch="Microsoft Visual Studio Code"; LatestProvider="Evergreen"; EvergreenName="MicrosoftVisualStudioCode"; WingetId="Microsoft.VisualStudioCode" }
-    @{ Name="Power BI Desktop";        LocalMatch="Microsoft Power BI Desktop";   LatestProvider="Evergreen"; EvergreenName="MicrosoftPowerBIDesktop";    WingetId="Microsoft.PowerBI" }
+    @{
+        Name    = "Adobe Acrobat"
+        Matches = @(
+            "Adobe Acrobat*"
+        )
+    },
 
-    # Winget for latest
-    @{ Name="Adobe Acrobat Reader";    LocalMatch="Adobe Acrobat Reader";         LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Adobe.Acrobat.Reader.64-bit" }
+    @{
+        Name    = "Google Chrome"
+        Matches = @(
+            "Google Chrome*"
+        )
+    },
 
-    # Full Acrobat tracked separately (no latest lookup)
-    @{ Name="Adobe Acrobat (full)";    LocalMatch="Adobe Acrobat";                LatestProvider="None";      EvergreenName=$null;                       WingetId=$null }
+    @{
+        Name    = "Microsoft Edge"
+        Matches = @(
+            "Microsoft Edge"
+        )
+    },
 
-    @{ Name="Microsoft Teams";         LocalMatch="Microsoft Teams";              LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Microsoft.Teams" }
-    @{ Name="OneDrive";                LocalMatch="Microsoft OneDrive";           LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Microsoft.OneDrive" }
-    @{ Name="GitHub Desktop";          LocalMatch="GitHub Desktop";               LatestProvider="Winget";    EvergreenName=$null;                       WingetId="GitHub.GitHubDesktop" }
-    @{ Name="Azure Data Studio";       LocalMatch="Azure Data Studio";            LatestProvider="Winget";    EvergreenName=$null;                       WingetId="Microsoft.AzureDataStudio" }
+    @{
+        Name    = "Microsoft Visual Studio Code"
+        Matches = @(
+            "Microsoft Visual Studio Code*"
+        )
+    },
+
+    @{
+        Name    = "Microsoft Power BI Desktop"
+        Matches = @(
+            "Microsoft PowerBI Desktop*",
+            "Microsoft Power BI Desktop*"
+        )
+    },
+
+    @{
+        Name    = "Microsoft Teams"
+        Matches = @(
+            "Microsoft Teams*",
+            "Microsoft Teams classic*"
+        )
+    },
+
+    @{
+        Name    = "Microsoft OneDrive"
+        Matches = @(
+            "Microsoft OneDrive*"
+        )
+    },
+
+    @{
+        Name    = "Mozilla Firefox"
+        Matches = @(
+            "Mozilla Firefox*"
+        )
+    }
 )
 
-$ReportPath  = Join-Path $env:PUBLIC "AVD-AppUpdateReport.html"
-$CsvPath     = Join-Path $env:PUBLIC "AVD-AppUpdateReport.csv"
-$LogPath     = Join-Path $env:PUBLIC "AVD-AppUpdateActions.log"
+# ============================================================
+# NEW APPLICATION INVENTORY
+# ============================================================
 
-# Prefer D:\_Source\_AppUpdates for Evergreen downloads, with fallbacks
-$DownloadDirCandidates = @(
-  "D:\_Source\_AppUpdates",
-  "C:\_Source\_AppUpdates",
-  (Join-Path $env:ProgramData "AVD-AppDownloads")
+$InventoryApps = @(
+
+    @{
+        Name    = "8x8 Work"
+        Matches = @(
+            "8x8 Work*"
+        )
+    },
+
+    @{
+        Name    = "Adobe Acrobat (64-bit)"
+        Matches = @(
+            "Adobe Acrobat*"
+        )
+    },
+
+    @{
+        Name    = "Foxit PDF Editor"
+        Matches = @(
+            "Foxit PDF Editor*"
+        )
+    },
+
+    @{
+        Name    = "Infor Query & Analysis 11"
+        Matches = @(
+            "Infor Query & Analysis 11"
+        )
+    },
+
+    @{
+        Name    = "Infor Query & Analysis 11 DataLink Server"
+        Matches = @(
+            "Infor Query & Analysis 11 DataLink Server*"
+        )
+    },
+
+    @{
+        Name    = "Microsoft 365 Apps for business - en-gb"
+        Matches = @(
+            "Microsoft 365 Apps for business*"
+        )
+    },
+
+    @{
+        Name    = "Microsoft Edge"
+        Matches = @(
+            "Microsoft Edge"
+        )
+    },
+
+    @{
+        Name    = "Microsoft OneDrive"
+        Matches = @(
+            "Microsoft OneDrive*"
+        )
+    },
+
+    @{
+        Name    = "Microsoft PowerBI Desktop (x64)"
+        Matches = @(
+            "Microsoft PowerBI Desktop*",
+            "Microsoft Power BI Desktop*"
+        )
+    },
+
+    @{
+        Name    = "Microsoft Project - en-us"
+        Matches = @(
+            "Microsoft Project - en-us*",
+            "Microsoft Project*"
+        )
+    },
+
+    @{
+        Name    = "Microsoft Report Builder"
+        Matches = @(
+            "Microsoft Report Builder*"
+        )
+    },
+
+    @{
+        Name    = "Microsoft SQL Server 2012 Native Client"
+        Matches = @(
+            "Microsoft SQL Server 2012 Native Client*"
+        )
+    },
+
+    @{
+        Name    = "Microsoft SQL Server Management Studio"
+        Matches = @(
+            "Microsoft SQL Server Management Studio*"
+        )
+    },
+
+    @{
+        Name    = "Microsoft Visio - en-us"
+        Matches = @(
+            "Microsoft Visio - en-us*",
+            "Microsoft Visio*"
+        )
+    },
+
+    @{
+        Name    = "Microsoft Visual Studio 2010 Tools for Office Runtime"
+        Matches = @(
+            "Microsoft Visual Studio 2010 Tools for Office Runtime*"
+        )
+    },
+
+    @{
+        Name    = "SunSystems 6.4.0"
+        Matches = @(
+            "SunSystems 6.4.0*",
+            "SunSystems*"
+        )
+    },
+
+    @{
+        Name    = "Git"
+        Matches = @(
+            "Git",
+            "Git version*"
+        )
+    }
 )
-$DownloadDir = $null
-foreach ($p in $DownloadDirCandidates) {
+
+# ============================================================
+# FUNCTIONS
+# ============================================================
+
+function Convert-InstallDate {
+
+    param(
+        [string]$InstallDate
+    )
+
+    if ([string]::IsNullOrWhiteSpace($InstallDate)) {
+        return "Unknown"
+    }
+
+    # Most MSI dates are yyyyMMdd
+    if ($InstallDate -match '^\d{8}$') {
+
+        try {
+
+            return [datetime]::ParseExact(
+                $InstallDate,
+                "yyyyMMdd",
+                [System.Globalization.CultureInfo]::InvariantCulture
+            ).ToString("dd/MM/yyyy")
+
+        }
+        catch {
+            return $InstallDate
+        }
+    }
+
     try {
-        if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
-        $DownloadDir = $p; break
-    } catch { }
+        return ([datetime]$InstallDate).ToString("dd/MM/yyyy")
+    }
+    catch {
+        return $InstallDate
+    }
 }
-if (-not $DownloadDir) { throw "Could not create a download directory in any candidate path." }
-Write-Host "Evergreen download directory: $DownloadDir" -ForegroundColor DarkGray
 
-# ---------------- Environment / winget helpers ----------------
-$WingetMsStoreTlsErr = -1978335138  # 0x8A15005E
+# ------------------------------------------------------------
+# Get all installed applications
+# ------------------------------------------------------------
 
-function Test-WingetReady {
-    try { $null = Get-Command winget -ErrorAction Stop } catch { return $false }
-    try { winget --version | Out-Null; return $true } catch { return $false }
+function Get-InstalledApplications {
+
+    $RegistryLocations = @(
+
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
+
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )
+
+    $Results = @()
+
+    foreach ($RegistryPath in $RegistryLocations) {
+
+        $Apps = Get-ItemProperty `
+            -Path $RegistryPath `
+            -ErrorAction SilentlyContinue |
+            Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_.DisplayName)
+            }
+
+        foreach ($App in $Apps) {
+
+            $InstallDate = Convert-InstallDate $App.InstallDate
+
+            $Results += [PSCustomObject]@{
+
+                DisplayName    = $App.DisplayName
+                DisplayVersion = $App.DisplayVersion
+                Publisher      = $App.Publisher
+                InstallDate    = $InstallDate
+                RawInstallDate = $App.InstallDate
+                RegistryPath   = $App.PSPath
+            }
+        }
+    }
+
+    # Remove duplicate entries
+    $Results |
+        Sort-Object DisplayName, DisplayVersion -Unique
 }
-function Test-EvergreenReady {
-    try { $m = Get-Module -ListAvailable -Name Evergreen; if ($m) { Import-Module Evergreen -ErrorAction SilentlyContinue | Out-Null; return $true } }
-    catch {}
+
+# ------------------------------------------------------------
+# Match application
+# ------------------------------------------------------------
+
+function Find-Application {
+
+    param(
+
+        [array]$InstalledApps,
+
+        [array]$Patterns
+    )
+
+    $Matches = @()
+
+    foreach ($Pattern in $Patterns) {
+
+        $Found = $InstalledApps |
+            Where-Object {
+                $_.DisplayName -like $Pattern
+            }
+
+        if ($Found) {
+            $Matches += $Found
+        }
+    }
+
+    $Matches |
+        Sort-Object DisplayName, DisplayVersion -Unique
+}
+
+# ------------------------------------------------------------
+# Determine whether date belongs to current month
+# ------------------------------------------------------------
+
+function Test-CurrentMonth {
+
+    param(
+        [string]$Date
+    )
+
+    if (
+        [string]::IsNullOrWhiteSpace($Date) -or
+        $Date -eq "Unknown"
+    ) {
+        return $false
+    }
+
+    try {
+
+        $ParsedDate = [datetime]::ParseExact(
+            $Date,
+            "dd/MM/yyyy",
+            [System.Globalization.CultureInfo]::InvariantCulture
+        )
+
+        if (
+            $ParsedDate.Month -eq (Get-Date).Month -and
+            $ParsedDate.Year -eq (Get-Date).Year
+        ) {
+            return $true
+        }
+
+    }
+    catch {
+        return $false
+    }
+
     return $false
 }
-function Disable-MsStoreSource {
-    try {
-        $src = winget source list 2>$null
-        if ($src -match '^\s*msstore\s+' -and $src -match 'Enabled') {
-            Write-Host "winget: disabling 'msstore' source for this user..." -ForegroundColor DarkGray
-            winget source disable msstore | Out-Null
-        }
-    } catch {}
-}
 
-# ---------------- App-specific helpers ----------------
-function Get-GitHubDesktopVersion {
-    try {
-        $root = Join-Path $env:LOCALAPPDATA "GitHubDesktop"
-        if (-not (Test-Path $root)) { return $null }
-        $exe = Get-ChildItem -Path $root -Filter "GitHubDesktop.exe" -Recurse -ErrorAction SilentlyContinue |
-               Sort-Object FullName -Descending | Select-Object -First 1
-        if ($exe) { return (Get-Item $exe.FullName).VersionInfo.ProductVersion }
-    } catch {}
-    return $null
-}
-function Get-VSCodeVersion {
-    $paths = @(
-        "$env:LOCALAPPDATA\Programs\Microsoft VS Code\Code.exe",     # user setup
-        "$env:ProgramFiles\Microsoft VS Code\Code.exe",              # system (x64)
-        "${env:ProgramFiles(x86)}\Microsoft VS Code\Code.exe"        # system (x86)
-    )
-    foreach ($p in $paths) {
-        if (Test-Path $p) {
-            try { return (Get-Item $p).VersionInfo.ProductVersion } catch {}
-        }
-    }
-    return $null
-}
+# ------------------------------------------------------------
+# HTML encode
+# ------------------------------------------------------------
 
-# ---------------- Installed version (smart) ----------------
-function Get-InstalledAppVersion {
+function HtmlEncode {
+
     param(
-        [Parameter(Mandatory)][string]$DisplayNameMatch,
-        [string[]]$ExcludePatterns = $null
+        [string]$Text
     )
 
-    # --- Microsoft Teams (MSIX) — prefer package version (pick newest if many) ---
-    if ($DisplayNameMatch -eq "Microsoft Teams") {
-        $packages = @()
-        foreach ($n in 'MSTeams','MicrosoftTeams') {
-            try { $packages += Get-AppxPackage -AllUsers -Name $n -ErrorAction SilentlyContinue } catch {}
-            try { $packages += Get-AppxPackage          -Name $n -ErrorAction SilentlyContinue } catch {}
-        }
-        $pkg = $packages | Where-Object { $_ } | Sort-Object Version -Descending | Select-Object -First 1
-        if ($pkg) { return $pkg.Version.ToString() }
-        # fall through to registry for legacy Teams
+    if ($null -eq $Text) {
+        return ""
     }
 
-    # --- Office C2R direct registry read ---
-    if ($DisplayNameMatch -eq "__OFFICE_C2R__") {
-        $key = "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration"
-        if (Test-Path $key) { $v = (Get-ItemProperty $key -ErrorAction SilentlyContinue).VersionToReport; if ($v) { return $v } }
-        return $null
-    }
-
-    # --- VS Code — prefer Code.exe file version ---
-    if ($DisplayNameMatch -eq "Microsoft Visual Studio Code") {
-        $vsver = Get-VSCodeVersion
-        if ($vsver) { return $vsver }
-        # fall through to registry if not found
-    }
-
-    # --- GitHub Desktop — prefer app file version ---
-    if ($DisplayNameMatch -eq "GitHub Desktop") {
-        $gh = Get-GitHubDesktopVersion
-        if ($gh) { return $gh }
-    }
-
-    # --- Generic registry scan (noise filters applied) ---
-    $roots = @(
-        "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
-    )
-    $nameExcludes = @(
-        'WebView','Runtime','WebView2','Updater','Update','AutoUpdate',
-        'Maintenance','Service','Helper','Crashpad','Stub',
-        'Machine-wide','User Installer','System Installer','Setup'
-    )
-    $candidates = @()
-
-    foreach ($rt in $roots) {
-        if (-not (Test-Path $rt)) { continue }
-        foreach ($sub in Get-ChildItem $rt -ErrorAction SilentlyContinue) {
-            $p = Get-ItemProperty $sub.PSPath -ErrorAction SilentlyContinue
-            $dn = $p.DisplayName; if (-not $dn) { continue }
-            if ($dn -notlike "*$DisplayNameMatch*") { continue }
-
-            $skip = $false
-            foreach ($ex in $nameExcludes) { if ($dn -match [regex]::Escape($ex)) { $skip=$true; break } }
-            if ($skip) { continue }
-            if ($ExcludePatterns) { foreach ($ex in $ExcludePatterns) { if ($dn -match [regex]::Escape($ex)) { $skip=$true; break } } }
-            if ($skip) { continue }
-
-            $dv = $p.DisplayVersion
-            $score = if ($dn -ieq $DisplayNameMatch) {3} elseif ($dn -ilike "$DisplayNameMatch*") {2} else {1}
-            $vObj = $null; if ($dv) { try { $vObj = [version]($dv -replace '[^\d\.]','') } catch {} }
-            $candidates += [pscustomobject]@{ DisplayName=$dn; DisplayVersion=$dv; Score=$score; VersionObj=$vObj; KeyPath=$sub.PSPath }
-        }
-    }
-    if ($candidates.Count -eq 0) { return $null }
-    ($candidates | Sort-Object @{e="Score";Descending=$true}, @{e="VersionObj";Descending=$true} | Select-Object -First 1).DisplayVersion
+    return [System.Net.WebUtility]::HtmlEncode($Text)
 }
 
-# ---------------- Latest version (forces winget source) ----------------
-function Get-LatestWingetVersion {
-    param([Parameter(Mandatory)][string]$WingetId)
-    $out = winget search --id $WingetId --exact --source winget --accept-source-agreements 2>$null
-    if ($out) {
-        $line = ($out -split "`r?`n" | Where-Object { $_ -match [regex]::Escape($WingetId) -and $_ -match "\|" } | Select-Object -First 1)
-        if ($line) { $parts = $line -split "\|"; if ($parts.Count -ge 3) { return $parts[2].Trim() } }
-    }
-    $out2 = winget show --id $WingetId --exact --source winget --accept-source-agreements 2>$null
-    if ($out2) {
-        $verLine = ($out2 -split "`r?`n") | Where-Object { $_ -match "^\s*Version\s*:" } | Select-Object -First 1
-        if ($verLine) { return ($verLine -split ":\s*",2)[1].Trim() }
-    }
-    return $null
-}
-function Get-LatestEvergreenVersion {
-    param([Parameter(Mandatory)][string]$EvergreenName)
-    try {
-        $data = Get-EvergreenApp -Name $EvergreenName -ErrorAction Stop
-        if (-not $data) { return $null }
-        if ($null -ne ($data | Get-Member -Name Channel -ErrorAction SilentlyContinue)) {
-            $stable = $data | Where-Object { $_.Channel -match 'Stable' }
-            if ($stable) { $data = $stable }
-        }
-        $data | Where-Object { $_.Version } |
-            Sort-Object { try {[version]($_.Version -replace '[^\d\.]','')} catch { $_.Version } } -Descending |
-            Select-Object -First 1 -ExpandProperty Version
-    } catch { return $null }
-}
+# ============================================================
+# COLLECT APPLICATION DATA
+# ============================================================
 
-# ---------------- Version compare ----------------
-function Compare-VersionSmart {
-    param([string]$Installed,[string]$Latest)
-    if (-not $Installed -or -not $Latest) { return $null }
-    try {
-        $v1 = [version]($Installed -replace '[^\d\.]','')
-        $v2 = [version]($Latest    -replace '[^\d\.]','')
-        [Math]::Sign($v1.CompareTo($v2))
-    } catch { if ($Installed -eq $Latest) {0} else {-1} }
+Write-Host ""
+Write-Host "===============================================" -ForegroundColor Cyan
+Write-Host " AVD APPLICATION REPORT" -ForegroundColor Cyan
+Write-Host "===============================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Computer : $ComputerName"
+Write-Host "Period   : $MonthName"
+Write-Host ""
+
+Write-Host "Collecting installed applications..." -ForegroundColor Yellow
+
+$InstalledApps = @(Get-InstalledApplications)
+
+Write-Host "Applications discovered: $($InstalledApps.Count)" -ForegroundColor Green
+
+# ============================================================
+# OS INFORMATION
+# ============================================================
+
+Write-Host "Collecting Windows information..." -ForegroundColor Yellow
+
+$OS = Get-CimInstance Win32_OperatingSystem
+
+$OSInfo = [PSCustomObject]@{
+
+    ComputerName = $ComputerName
+    OS           = $OS.Caption
+    Version      = $OS.Version
+    Build        = $OS.BuildNumber
+    Architecture = $OS.OSArchitecture
+    LastBootTime = $OS.LastBootUpTime.ToString("dd/MM/yyyy HH:mm")
 }
 
-# ---------------- Windows Update row ----------------
-function Get-WindowsUpdateStatus {
-    try {
-        $session = New-Object -ComObject Microsoft.Update.Session
-        $searcher = $session.CreateUpdateSearcher()
-        $result = $searcher.Search("IsInstalled=0 and IsHidden=0 and Type='Software'")
-        $pending = $result.Updates.Count
-    } catch { $pending = $null }
+# ============================================================
+# WINDOWS UPDATE HISTORY
+# ============================================================
 
-    $os = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
-    $installedTxt = "$($os.DisplayVersion) (Build $($os.CurrentBuild).$($os.UBR))"
+$RecentUpdates = @()
 
-    if ($pending -gt 0) { [PSCustomObject]@{ Installed=$installedTxt; Latest="Updates available ($pending)"; Status="Update available"; UpgradeTo="Apply Windows Updates" } }
-    elseif ($pending -eq 0) { [PSCustomObject]@{ Installed=$installedTxt; Latest="-"; Status="Up-to-date"; UpgradeTo="-" } }
-    else { [PSCustomObject]@{ Installed=$installedTxt; Latest="-"; Status="Unknown (WU query failed)"; UpgradeTo="-" } }
-}
+try {
 
-# ---------------- Evergreen download/install ----------------
-$EvergreenSilentArgs = @{
-  "MicrosoftVisualStudioCode" = "/VERYSILENT /NORESTART"
-  "MicrosoftPowerBIDesktop"   = "/quiet ACCEPT_EULA=1"
-}
-function Get-EvergreenAsset {
-    param([Parameter(Mandatory)][string]$EvergreenName)
-    try {
-        $data = Get-EvergreenApp -Name $EvergreenName -ErrorAction Stop
-        if (-not $data) { return $null }
-        if ($null -ne ($data | Get-Member -Name Channel -ErrorAction SilentlyContinue)) {
-            $data = $data | Where-Object { $_.Channel -match 'Stable' -or -not $_.Channel }
-        }
-        $arch = if ([Environment]::Is64BitOperatingSystem) {"x64|amd64"} else {"x86|i386"}
-        if ($null -ne ($data | Get-Member -Name Architecture -ErrorAction SilentlyContinue)) {
-            $c = $data | Where-Object { $_.Architecture -match $arch }; if ($c) { $data = $c }
-        }
-        $msi = $data | Where-Object { $_.Uri -match '\.msi($|\?)' } | Select-Object -First 1
-        if ($msi) { return $msi }
-        $exe = $data | Where-Object { $_.Uri -match '\.exe($|\?)' } | Select-Object -First 1
-        if ($exe) { return $exe }
-    } catch {}
-    return $null
-}
-function Install-AppEvergreen {
-    param(
-      [Parameter(Mandatory)][string]$EvergreenName,
-      [Parameter(Mandatory)][string]$AppDisplayName,
-      [switch]$WhatIf
-    )
-    $asset = Get-EvergreenAsset -EvergreenName $EvergreenName
-    if (-not $asset -or -not $asset.Uri) { return [pscustomobject]@{ Used="Evergreen"; Result="NoAsset"; ExitCode=-1 } }
-    $uri  = $asset.Uri
-    $file = Join-Path $DownloadDir ([IO.Path]::GetFileName((($uri -split '\?')[0])))
+    $HotFixes = Get-HotFix |
+        Sort-Object InstalledOn -Descending
 
-    Write-Host "${AppDisplayName}: downloading from $uri" -ForegroundColor DarkCyan
-    if ($WhatIf) {
-        Write-Host "WhatIf: would download to $file" -ForegroundColor Gray
-    } else {
-        try {
-            try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
-            Invoke-WebRequest -UseBasicParsing -Uri $uri -OutFile $file -ErrorAction Stop
-        } catch {
-            Write-Warning "${AppDisplayName}: download failed: $($_.Exception.Message)"
-            return [pscustomobject]@{ Used="Evergreen"; Result="DownloadFailed"; ExitCode=-1 }
+    foreach ($HotFix in $HotFixes) {
+
+        if ($HotFix.InstalledOn) {
+
+            $RecentUpdates += [PSCustomObject]@{
+
+                HotFixID    = $HotFix.HotFixID
+                Description = $HotFix.Description
+                InstalledOn = $HotFix.InstalledOn
+            }
         }
     }
 
-    $ext = [IO.Path]::GetExtension($file).ToLowerInvariant()
-    if ($ext -eq ".msi") {
-        $args = "/i `"$file`" /qn /norestart"
-        if ($WhatIf) { Write-Host "WhatIf: msiexec $args" -ForegroundColor Gray; return [pscustomobject]@{ Used="Evergreen"; Result="WouldRun"; ExitCode=0 } }
-        $p = Start-Process msiexec -ArgumentList $args -Wait -PassThru -NoNewWindow
-        return [pscustomobject]@{ Used="Evergreen"; Result="RanMSI"; ExitCode=$p.ExitCode }
-    } elseif ($ext -eq ".exe") {
-        $exeArgs = $null
-        if ($EvergreenSilentArgs.ContainsKey($EvergreenName)) {
-            $exeArgs = "$($EvergreenSilentArgs[$EvergreenName])"
-        } else {
-            Write-Host "${AppDisplayName}: unknown silent args for Evergreen EXE; will fall back to winget." -ForegroundColor Yellow
-            return [pscustomobject]@{ Used="Evergreen"; Result="UnknownExeArgs"; ExitCode=-1; File=$file }
-        }
-        if ($WhatIf) { Write-Host "WhatIf: `"$file`" $exeArgs" -ForegroundColor Gray; return [pscustomobject]@{ Used="Evergreen"; Result="WouldRun"; ExitCode=0 } }
-        $p = Start-Process -FilePath $file -ArgumentList $exeArgs -Wait -PassThru -NoNewWindow
-        return [pscustomobject]@{ Used="Evergreen"; Result="RanEXE"; ExitCode=$p.ExitCode }
-    } else { [pscustomobject]@{ Used="Evergreen"; Result="UnsupportedType"; ExitCode=-1 } }
+}
+catch {
+
+    Write-Warning "Unable to retrieve Windows Update history."
 }
 
-# --------- Office & Teams helpers ---------
-function Update-OfficeC2R {
-    param([switch]$WhatIf)
-    $c2r = Join-Path "$env:ProgramFiles\Common Files\Microsoft Shared\ClickToRun" "OfficeC2RClient.exe"
-    if (-not (Test-Path $c2r)) { return [pscustomobject]@{ Found=$false; ExitCode=-1; Result="C2R client not found" } }
-    $args = "/update user displaylevel=false forceappshutdown=true"
-    if ($WhatIf) { Write-Host "WhatIf: `"$c2r`" $args" -ForegroundColor Gray; return [pscustomobject]@{ Found=$true; ExitCode=0; Result="WouldRun" } }
-    Write-Host "Microsoft Office 365: running OfficeC2RClient update..." -ForegroundColor Cyan
-    $p = Start-Process -FilePath $c2r -ArgumentList $args -NoNewWindow -PassThru -Wait
-    [pscustomobject]@{ Found=$true; ExitCode=$p.ExitCode; Result=$(if ($p.ExitCode -eq 0) { "Success" } else { "ExitCode $($p.ExitCode)" }) }
-}
-function Stop-TeamsIfRunning {
-    $names = @("ms-teams","ms-teams-updater","Teams","MSTeams")
-    foreach ($n in $names) {
-        Get-Process -Name $n -ErrorAction SilentlyContinue | ForEach-Object {
-            try { Stop-Process -Id $_.Id -Force -ErrorAction Stop } catch {}
-        }
-    }
-}
+# ============================================================
+# MAIN PATCHING APPLICATION TABLE
+# ============================================================
 
-# ---------------- Upgrades WITH PROGRESS ----------------
-function Invoke-AppUpgrades {
-    param(
-        [Parameter(Mandatory)][array]$Results,
-        [Parameter(Mandatory)][array]$AppConfig,
-        [switch]$IncludeWindowsUpdate,
-        [switch]$WhatIf,
-        [switch]$WindowsOnly
+Write-Host "Building patching application table..." -ForegroundColor Yellow
+
+$AppStatusResults = @()
+
+foreach ($AppDefinition in $AppsToCheck) {
+
+    $Matches = @(
+        Find-Application `
+            -InstalledApps $InstalledApps `
+            -Patterns $AppDefinition.Matches
     )
 
-    Add-Content -Path $LogPath -Value "`n==== $(Get-Date) ===="
+    if ($Matches.Count -gt 0) {
 
-    if ($DisableMsStore -and (Test-WingetReady)) { Disable-MsStoreSource }
+        foreach ($Match in $Matches) {
 
-    if ($IncludeWindowsUpdate) {
-        $wu = $Results | Where-Object Application -eq "Windows Updates"
-        if ($wu -and $wu.Status -eq "Update available") {
-            Write-Progress -Activity "Windows Update" -Status "Installing available updates..." -PercentComplete 0
-            try {
-                if (Get-Module -ListAvailable -Name PSWindowsUpdate) {
-                    Import-Module PSWindowsUpdate -ErrorAction SilentlyContinue | Out-Null
-                    if ($WhatIf) { Write-Host "WhatIf: Get-WindowsUpdate -AcceptAll -Install -AutoReboot:`$false" -ForegroundColor Gray }
-                    else { Get-WindowsUpdate -AcceptAll -Install -AutoReboot:$false | Tee-Object -FilePath $LogPath -Append | Out-Null }
-                } else { Write-Warning "PSWindowsUpdate not installed; skipping OS updates." }
-            } catch { Write-Warning "Windows Update install failed: $($_.Exception.Message)" }
-            Write-Progress -Activity "Windows Update" -Completed
-        } else { Write-Host "Windows Update: no pending updates detected." -ForegroundColor DarkGray }
-        if ($WindowsOnly) { Write-Host "Windows Update-only run: skipping application upgrades." -ForegroundColor DarkGray; return }
+            $UpdatedThisMonth = Test-CurrentMonth $Match.InstallDate
+
+            if ($UpdatedThisMonth) {
+
+                $Status = "Updated this month"
+            }
+            elseif ($Match.InstallDate -eq "Unknown") {
+
+                $Status = "Installed - update date unavailable"
+            }
+            else {
+
+                $Status = "Installed"
+            }
+
+            $AppStatusResults += [PSCustomObject]@{
+
+                Application     = $AppDefinition.Name
+                InstalledName   = $Match.DisplayName
+
+                Version         = if ($Match.DisplayVersion) {
+                    $Match.DisplayVersion
+                }
+                else {
+                    "Unknown"
+                }
+
+                InstallDate     = $Match.InstallDate
+                Status          = $Status
+            }
+        }
+    }
+}
+
+# ============================================================
+# NEW APPLICATION INVENTORY TABLE
+# ============================================================
+
+Write-Host "Building application inventory..." -ForegroundColor Yellow
+
+$InventoryResults = @()
+
+foreach ($InventoryDefinition in $InventoryApps) {
+
+    $Matches = @(
+        Find-Application `
+            -InstalledApps $InstalledApps `
+            -Patterns $InventoryDefinition.Matches
+    )
+
+    if ($Matches.Count -gt 0) {
+
+        foreach ($Match in $Matches) {
+
+            $InventoryResults += [PSCustomObject]@{
+
+                ApplicationName = $Match.DisplayName
+
+                Version = if (
+                    [string]::IsNullOrWhiteSpace(
+                        $Match.DisplayVersion
+                    )
+                ) {
+                    "Unknown"
+                }
+                else {
+                    $Match.DisplayVersion
+                }
+
+                InstallDate = $Match.InstallDate
+            }
+        }
+    }
+    else {
+
+        # Keep requested application visible even when missing
+        $InventoryResults += [PSCustomObject]@{
+
+            ApplicationName = $InventoryDefinition.Name
+            Version         = "Not Installed"
+            InstallDate     = "-"
+        }
+    }
+}
+
+# Remove accidental duplicates
+
+$InventoryResults = @(
+    $InventoryResults |
+        Sort-Object ApplicationName, Version -Unique
+)
+
+# ============================================================
+# OTHER APPLICATIONS INSTALLED / UPDATED THIS MONTH
+# ============================================================
+
+Write-Host "Looking for other applications updated this month..." `
+    -ForegroundColor Yellow
+
+$OtherApplications = @()
+
+foreach ($App in $InstalledApps) {
+
+    if (Test-CurrentMonth $App.InstallDate) {
+
+        $AlreadyTracked = $false
+
+        # Check main applications
+        foreach ($Definition in $AppsToCheck) {
+
+            foreach ($Pattern in $Definition.Matches) {
+
+                if ($App.DisplayName -like $Pattern) {
+                    $AlreadyTracked = $true
+                    break
+                }
+            }
+
+            if ($AlreadyTracked) {
+                break
+            }
+        }
+
+        if (-not $AlreadyTracked) {
+
+            $OtherApplications += [PSCustomObject]@{
+
+                Application = $App.DisplayName
+
+                Version = if ($App.DisplayVersion) {
+                    $App.DisplayVersion
+                }
+                else {
+                    "Unknown"
+                }
+
+                Publisher   = $App.Publisher
+                InstallDate = $App.InstallDate
+            }
+        }
+    }
+}
+
+$OtherApplications = @(
+    $OtherApplications |
+        Sort-Object Application -Unique
+)
+
+# ============================================================
+# CSV OUTPUTS
+# ============================================================
+
+$Prefix = "$ComputerName-$DateStamp"
+
+$AppStatusCSV = Join-Path `
+    $LocalMonthFolder `
+    "$Prefix-AppStatus.csv"
+
+$InventoryCSV = Join-Path `
+    $LocalMonthFolder `
+    "$Prefix-ApplicationInventory.csv"
+
+$OSInfoCSV = Join-Path `
+    $LocalMonthFolder `
+    "$Prefix-OSInfo.csv"
+
+$OSUpdatesCSV = Join-Path `
+    $LocalMonthFolder `
+    "$Prefix-OSUpdates.csv"
+
+$OtherAppsCSV = Join-Path `
+    $LocalMonthFolder `
+    "$Prefix-OtherApplications.csv"
+
+$AppStatusResults |
+    Export-Csv `
+        -Path $AppStatusCSV `
+        -NoTypeInformation `
+        -Encoding UTF8
+
+$InventoryResults |
+    Export-Csv `
+        -Path $InventoryCSV `
+        -NoTypeInformation `
+        -Encoding UTF8
+
+$OSInfo |
+    Export-Csv `
+        -Path $OSInfoCSV `
+        -NoTypeInformation `
+        -Encoding UTF8
+
+$RecentUpdates |
+    Export-Csv `
+        -Path $OSUpdatesCSV `
+        -NoTypeInformation `
+        -Encoding UTF8
+
+$OtherApplications |
+    Export-Csv `
+        -Path $OtherAppsCSV `
+        -NoTypeInformation `
+        -Encoding UTF8
+
+# ============================================================
+# HTML TABLE BUILDERS
+# ============================================================
+
+# ------------------------------------------------------------
+# OS table
+# ------------------------------------------------------------
+
+$OSHtml = @"
+<table>
+<tr>
+    <th>Computer Name</th>
+    <th>Operating System</th>
+    <th>Version</th>
+    <th>Build</th>
+    <th>Architecture</th>
+    <th>Last Boot</th>
+</tr>
+<tr>
+    <td>$(HtmlEncode $OSInfo.ComputerName)</td>
+    <td>$(HtmlEncode $OSInfo.OS)</td>
+    <td>$(HtmlEncode $OSInfo.Version)</td>
+    <td>$(HtmlEncode $OSInfo.Build)</td>
+    <td>$(HtmlEncode $OSInfo.Architecture)</td>
+    <td>$(HtmlEncode $OSInfo.LastBootTime)</td>
+</tr>
+</table>
+"@
+
+# ------------------------------------------------------------
+# Main application status table
+# ------------------------------------------------------------
+
+$AppHtml = @"
+<table>
+<tr>
+    <th>Application</th>
+    <th>Installed Name</th>
+    <th>Version</th>
+    <th>Install / Update Date</th>
+    <th>Status</th>
+</tr>
+"@
+
+foreach ($App in $AppStatusResults) {
+
+    switch ($App.Status) {
+
+        "Updated this month" {
+            $Class = "good"
+        }
+
+        "Installed - update date unavailable" {
+            $Class = "warning"
+        }
+
+        default {
+            $Class = ""
+        }
     }
 
-    $queue = @($Results | Where-Object { $_.Application -ne "Windows Updates" -and $_.Status -eq "Update available" })
-    $total = $queue.Count
-    if ($total -eq 0) { Write-Host "No application upgrades required." -ForegroundColor Green; return }
+    $AppHtml += @"
+<tr>
+    <td>$(HtmlEncode $App.Application)</td>
+    <td>$(HtmlEncode $App.InstalledName)</td>
+    <td>$(HtmlEncode $App.Version)</td>
+    <td>$(HtmlEncode $App.InstallDate)</td>
+    <td class="$Class">$(HtmlEncode $App.Status)</td>
+</tr>
+"@
+}
 
-    Write-Host ("Upgrading {0} application(s)..." -f $total) -ForegroundColor Cyan
-    $i = 0; $actions = @()
+$AppHtml += "</table>"
 
-    foreach ($r in $queue) {
-        $i++
-        $cfg = $AppConfig | Where-Object { $_.Name -eq $r.Application } | Select-Object -First 1
-        if (-not $cfg) { continue }
-        $label = "[{0}/{1}] {2}" -f $i,$total,$cfg.Name
-        $den = [Math]::Max(1, $total)
-        $pct = [int]([Math]::Max(0, [Math]::Min(100, ((($i - 1) * 100.0) / $den)) ))
+# ============================================================
+# APPLICATION INVENTORY HTML
+# ============================================================
 
-        Write-Progress -Activity "Upgrading applications" -Status ("{0} — preparing" -f $label) -PercentComplete $pct
-        $fromVer = $r.Installed; $method="-"; $exit=$null; $result="Skipped"
+$InventoryHtml = @"
+<table>
+<tr>
+    <th>Application Name</th>
+    <th>Version</th>
+    <th>Install Date</th>
+</tr>
+"@
 
-        if ($cfg.Name -eq "Microsoft Office 365") {
-            $office = Update-OfficeC2R -WhatIf:$WhatIf
-            $method = "OfficeC2R"; $exit = $office.ExitCode; $result = $office.Result
-            Add-Content -Path $LogPath -Value ("Office 365: OfficeC2R {0}, exit {1}" -f $result,$exit)
+foreach ($App in $InventoryResults) {
+
+    if ($App.Version -eq "Not Installed") {
+        $RowClass = "notinstalled"
+    }
+    else {
+        $RowClass = ""
+    }
+
+    $InventoryHtml += @"
+<tr class="$RowClass">
+    <td>$(HtmlEncode $App.ApplicationName)</td>
+    <td>$(HtmlEncode $App.Version)</td>
+    <td>$(HtmlEncode $App.InstallDate)</td>
+</tr>
+"@
+}
+
+$InventoryHtml += "</table>"
+
+# ============================================================
+# WINDOWS UPDATE TABLE
+# ============================================================
+
+$UpdateHtml = @"
+<table>
+<tr>
+    <th>KB</th>
+    <th>Description</th>
+    <th>Installed On</th>
+</tr>
+"@
+
+$RecentUpdates |
+    Select-Object -First 10 |
+    ForEach-Object {
+
+        $UpdateDate = $_.InstalledOn
+
+        if (
+            $UpdateDate.Month -eq $Now.Month -and
+            $UpdateDate.Year -eq $Now.Year
+        ) {
+            $UpdateClass = "good"
         }
         else {
-            $evergreenOk = (Get-Module -Name Evergreen -ListAvailable) -ne $null
-            if ($cfg.LatestProvider -eq 'Evergreen' -and $cfg.EvergreenName -and $evergreenOk) {
-                Write-Host ("{0}: Evergreen -> download/install..." -f $cfg.Name) -ForegroundColor Cyan
-                Write-Progress -Activity "Upgrading applications" -Status ("{0} — downloading (Evergreen)" -f $label) -PercentComplete $pct
-                $ev = Install-AppEvergreen -EvergreenName $cfg.EvergreenName -AppDisplayName $cfg.Name -WhatIf:$WhatIf
-                if ($ev.Result -in @("RanMSI","RanEXE","WouldRun")) {
-                    $method="Evergreen"; $exit=$ev.ExitCode
-                    $result = if ($WhatIf) {"Simulated"} else { if ($exit -eq 0) {"Success"} else {"ExitCode $exit"} }
-                    Add-Content -Path $LogPath -Value ("{0}: Evergreen {1} exit {2}" -f $cfg.Name,$ev.Result,$ev.ExitCode)
-                }
-            }
-
-            if ($cfg.Name -eq "Microsoft Teams" -and -not $WhatIf) { Stop-TeamsIfRunning }
-
-            if ($method -eq "-" -and $cfg.WingetId -and (Test-WingetReady)) {
-                Write-Host ("{0}: winget -> upgrade..." -f $cfg.Name) -ForegroundColor Cyan
-                Write-Progress -Activity "Upgrading applications" -Status ("{0} — running winget" -f $label) -PercentComplete $pct
-
-                $args = @("upgrade","--id",$cfg.WingetId,"--exact","--source","winget",
-                          "--accept-package-agreements","--accept-source-agreements","--silent")
-                if ($WhatIf) {
-                    Write-Host ("WhatIf: winget {0}" -f ($args -join ' ')) -ForegroundColor Gray
-                    Add-Content -Path $LogPath -Value ("WhatIf: winget {0}" -f ($args -join ' '))
-                    $method="winget"; $exit=0; $result="Simulated"
-                } else {
-                    try {
-                        $proc = Start-Process -FilePath "winget" -ArgumentList $args -NoNewWindow -PassThru -Wait
-                        $method="winget"; $exit=$proc.ExitCode
-                        if     ($proc.ExitCode -eq 0)                   { $result = "Success" }
-                        elseif ($proc.ExitCode -eq $WingetMsStoreTlsErr) { $result = "Source error (msstore/TLS). Use -DisableMsStore or fix proxy certs." }
-                        else { $result = "ExitCode $($proc.ExitCode)" }
-
-                        if ($cfg.Name -eq "Microsoft Teams" -and $proc.ExitCode -ne 0) {
-                            Write-Host "Microsoft Teams: retry with 'winget install --force'..." -ForegroundColor DarkYellow
-                            $args2 = @("install","--id",$cfg.WingetId,"--exact","--source","winget",
-                                       "--accept-package-agreements","--accept-source-agreements","--silent","--force")
-                            $proc2 = Start-Process -FilePath "winget" -ArgumentList $args2 -NoNewWindow -PassThru -Wait
-                            if ($proc2.ExitCode -eq 0) { $result = "Success (repair/install)"; $exit=0; $method="winget-install" }
-                            Add-Content -Path $LogPath -Value ("Teams install --force exit {0}" -f $proc2.ExitCode)
-                        }
-
-                        Add-Content -Path $LogPath -Value ("{0}: winget exitcode {1}" -f $cfg.Name,$proc.ExitCode)
-                    } catch {
-                        $method="winget"; $exit=-1; $result="Error"
-                        Write-Warning ("{0}: winget failed — {1}" -f $cfg.Name,$_.Exception.Message)
-                        Add-Content -Path $LogPath -Value ("{0}: winget error {1}" -f $cfg.Name,$_.Exception.Message)
-                    }
-                }
-            } elseif ($method -eq "-" -and -not $cfg.WingetId) {
-                Write-Warning ("{0}: no Evergreen path and no WingetId — cannot upgrade." -f $cfg.Name); $result="No installer path"
-            }
+            $UpdateClass = ""
         }
 
-        Write-Progress -Activity "Upgrading applications" -Status ("{0} — verifying" -f $label) -PercentComplete $pct
-        $toVer = $fromVer
-        if (-not $WhatIf) {
-            $exclude = $null; if ($cfg.Name -eq "Adobe Acrobat (full)") { $exclude=@('Reader') }
-            $toVer = Get-InstalledAppVersion -DisplayNameMatch $cfg.LocalMatch -ExcludePatterns $exclude
-        }
-
-        if ($result -eq "Success" -and $toVer -and $toVer -ne $fromVer) {
-            Write-Host ("{0}: upgraded {1} -> {2} via {3}" -f $cfg.Name,$fromVer,$toVer,$method) -ForegroundColor Green
-        } elseif ($result -like "Success (repair/install)*") {
-            Write-Host ("{0}: repaired/installed to {1} via {2}" -f $cfg.Name,$toVer,$method) -ForegroundColor Green
-        } elseif ($result -eq "Simulated") {
-            Write-Host ("{0}: would upgrade {1} -> {2} via {3}" -f $cfg.Name,$fromVer,$r.UpgradeTo,$method) -ForegroundColor Yellow
-        } else {
-            Write-Host ("{0}: {1} (method: {2}, from: {3}, to: {4})" -f $cfg.Name,$result,$method,$fromVer,$toVer) -ForegroundColor DarkYellow
-        }
-
-        $actions += [pscustomobject]@{
-            Application=$cfg.Name; Method=$method; From=$fromVer; To=$toVer;
-            Result=$result; ExitCode=$(if ($exit -ne $null) { $exit } else { "-" })
-        }
-    }
-
-    Write-Progress -Activity "Upgrading applications" -Completed
-    Write-Host "`nUpgrade summary:" -ForegroundColor White
-    $actions | Format-Table Application,Method,From,To,Result,ExitCode -AutoSize
-    foreach ($a in $actions) { Add-Content -Path $LogPath -Value ("{0}: {1} via {2} ({3} -> {4}) exit {5}" -f $a.Application,$a.Result,$a.Method,$a.From,$a.To,$a.ExitCode) }
-    Write-Host "Action log: $LogPath"
-}
-
-# -------------- Build results --------------
-function Get-AppResults {
-    param([Parameter(Mandatory)][array]$Apps)
-    $wingetOk = Test-WingetReady; $evergreenOk = Test-EvergreenReady
-
-    if ($wingetOk -and $DisableMsStore) { Disable-MsStoreSource }
-    if (-not $wingetOk)    { Write-Warning "winget not found/working. Winget lookups/installs will be skipped." }
-    if (-not $evergreenOk) { Write-Warning "Evergreen module not available. Evergreen lookups/installs will be skipped." }
-
-    $out = foreach ($app in $Apps) {
-        if ($app.LocalMatch -eq "__WINDOWS_UPDATE__") {
-            $wu = Get-WindowsUpdateStatus
-            [PSCustomObject]@{
-                Application=$app.Name
-                Installed =$wu.Installed
-                Latest    =$wu.Latest
-                Status    =$wu.Status
-                UpgradeTo =$wu.UpgradeTo
-                WingetId  ="-"
-            }
-            continue
-        }
-        $exclude = $null; if ($app.Name -eq "Adobe Acrobat (full)") { $exclude=@('Reader') }
-        $installed = Get-InstalledAppVersion -DisplayNameMatch $app.LocalMatch -ExcludePatterns $exclude
-        if (-not $installed) {
-            [PSCustomObject]@{
-                Application=$app.Name
-                Installed ="-"
-                Latest    ="-"
-                Status    ="Application not installed"
-                UpgradeTo ="-"
-                WingetId  =$(if ($app.WingetId) { $app.WingetId } else { "-" })
-            }
-            continue
-        }
-
-        $latest = $null
-        if ($app.LatestProvider -eq 'Evergreen' -and $evergreenOk -and $app.EvergreenName) { $latest = Get-LatestEvergreenVersion -EvergreenName $app.EvergreenName }
-        if (-not $latest -and $wingetOk -and $app.WingetId) { $latest = Get-LatestWingetVersion -WingetId $app.WingetId }
-
-        $cmp = Compare-VersionSmart -Installed $installed -Latest $latest
-        if (-not $latest) { $status = "Unknown (no latest info)" }
-        elseif ($cmp -lt 0) { $status = "Update available" }
-        elseif ($cmp -eq 0) { $status = "Up-to-date" }
-        else { $status = "Ahead of catalog" }
-
-        [PSCustomObject]@{
-            Application = $app.Name
-            Installed   = $installed
-            Latest      = $(if ($latest) { $latest } else { "-" })
-            Status      = $status
-            UpgradeTo   = $(if ($status -eq "Update available" -and $latest) { $latest } else { "-" })
-            WingetId    = $(if ($app.WingetId) { $app.WingetId } else { "-" })
-        }
-    }
-    $out | Sort-Object Application
-}
-
-# -------------- HTML writer --------------
-function Write-ReportHtml {
-    param([Parameter(Mandatory)][array]$Results)
-    $css = @"
-<style>
-body { font-family: Segoe UI, Arial, sans-serif; margin: 24px; }
-h1 { font-size: 20px; margin-bottom: 12px; }
-table { border-collapse: collapse; width: 100%; }
-th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-th { background: #f6f6f6; }
-tr.status-uptodate { background: #e8f5e9; }
-tr.status-update   { background: #ffebee; }
-tr.status-missing  { background: #eceff1; }
-tr.status-unknown  { background: #f3e5f5; }
-.badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; }
-.badge-ok      { background: #2e7d32; color: white; }
-.badge-update  { background: #c62828; color: white; }
-.badge-missing { background: #607d8b; color: white; }
-.badge-unknown { background: #6a1b9a; color: white; }
-.small { color: #666; font-size: 12px; }
-</style>
+        $UpdateHtml += @"
+<tr>
+    <td>$(HtmlEncode $_.HotFixID)</td>
+    <td>$(HtmlEncode $_.Description)</td>
+    <td class="$UpdateClass">$($_.InstalledOn.ToString("dd/MM/yyyy"))</td>
+</tr>
 "@
-    $rows = foreach ($r in $Results) {
-        $class="status-unknown"; $badgeClass="badge-unknown"
-        switch -Regex ($r.Status) {
-            "Up-to-date"               { $class="status-uptodate"; $badgeClass="badge-ok"; break }
-            "Update available"         { $class="status-update";   $badgeClass="badge-update"; break }
-            "Application not installed"{ $class="status-missing";  $badgeClass="badge-missing"; break }
-            default                    { $class="status-unknown";  $badgeClass="badge-unknown" }
-        }
-        "<tr class='$class'><td>$($r.Application)</td><td>$($r.Installed)</td><td>$($r.Latest)</td><td><span class='badge $badgeClass'>$($r.Status)</span></td><td>$($r.UpgradeTo)</td><td class='small'>$($r.WingetId)</td></tr>"
     }
-    $html = @"
-<html>
-<head><meta charset='utf-8'><title>AVD App Update Report</title>$css</head>
-<body>
-<h1>AVD App Update Report</h1>
+
+$UpdateHtml += "</table>"
+
+# ============================================================
+# OTHER APPLICATIONS HTML
+# ============================================================
+
+$OtherAppsHtml = ""
+
+if ($OtherApplications.Count -gt 0) {
+
+    $OtherAppsHtml = @"
 <table>
-<thead><tr><th>Application</th><th>Installed Version</th><th>Latest Version</th><th>Status</th><th>Upgrade To</th><th>Winget ID</th></tr></thead>
-<tbody>
-$(($rows -join "`n"))
-</tbody>
-</table>
-<p class='small'>Generated: $(Get-Date)</p>
+<tr>
+    <th>Application</th>
+    <th>Version</th>
+    <th>Publisher</th>
+    <th>Install / Update Date</th>
+</tr>
+"@
+
+    foreach ($App in $OtherApplications) {
+
+        $OtherAppsHtml += @"
+<tr>
+    <td>$(HtmlEncode $App.Application)</td>
+    <td>$(HtmlEncode $App.Version)</td>
+    <td>$(HtmlEncode $App.Publisher)</td>
+    <td class="good">$(HtmlEncode $App.InstallDate)</td>
+</tr>
+"@
+    }
+
+    $OtherAppsHtml += "</table>"
+}
+else {
+
+    $OtherAppsHtml = @"
+<div class="info">
+No additional applications were detected as installed or updated during $MonthName.
+</div>
+"@
+}
+
+# ============================================================
+# COMPLETE HTML REPORT
+# ============================================================
+
+$HtmlReport = @"
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="UTF-8">
+
+<title>AVD Application Report - $ComputerName</title>
+
+<style>
+
+body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    background-color: #f4f6f8;
+    margin: 0;
+    padding: 25px;
+    color: #2f3542;
+}
+
+.container {
+    max-width: 1500px;
+    margin: auto;
+    background: white;
+    padding: 30px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+    border-radius: 8px;
+}
+
+h1 {
+    margin-top: 0;
+    color: #1f4e78;
+    border-bottom: 4px solid #1f4e78;
+    padding-bottom: 12px;
+}
+
+h2 {
+    margin-top: 35px;
+    color: #1f4e78;
+    border-bottom: 2px solid #d9e2f3;
+    padding-bottom: 8px;
+}
+
+.subtitle {
+    color: #666;
+    margin-bottom: 25px;
+}
+
+.summary {
+    background: #eef4fa;
+    border-left: 5px solid #1f4e78;
+    padding: 15px 20px;
+    margin-bottom: 25px;
+}
+
+.summary strong {
+    color: #1f4e78;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 12px;
+    margin-bottom: 25px;
+    font-size: 14px;
+}
+
+th {
+    background-color: #1f4e78;
+    color: white;
+    text-align: left;
+    padding: 10px;
+    border: 1px solid #d0d7de;
+}
+
+td {
+    padding: 9px 10px;
+    border: 1px solid #d0d7de;
+}
+
+tr:nth-child(even) {
+    background-color: #f7f9fb;
+}
+
+tr:hover {
+    background-color: #eef4fa;
+}
+
+.good {
+    background-color: #dff0d8 !important;
+    color: #2e6b2e;
+    font-weight: 600;
+}
+
+.warning {
+    background-color: #fff3cd !important;
+    color: #856404;
+    font-weight: 600;
+}
+
+.bad {
+    background-color: #f8d7da !important;
+    color: #842029;
+    font-weight: 600;
+}
+
+.notinstalled td {
+    background-color: #f3f3f3 !important;
+    color: #777;
+}
+
+.info {
+    background-color: #eef4fa;
+    padding: 15px;
+    border-left: 5px solid #1f4e78;
+}
+
+.footer {
+    margin-top: 40px;
+    font-size: 12px;
+    color: #777;
+    text-align: center;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>AVD Master Image Application Report</h1>
+
+<div class="subtitle">
+Generated: $RunTime
+</div>
+
+<div class="summary">
+
+<strong>Server:</strong> $ComputerName
+<br>
+
+<strong>Reporting Period:</strong> $MonthName
+<br>
+
+<strong>Installed Applications Detected:</strong>
+$($InstalledApps.Count)
+
+<br>
+
+<strong>Tracked Inventory Applications:</strong>
+$($InventoryApps.Count)
+
+</div>
+
+
+<h2>1. Operating System Information</h2>
+
+$OSHtml
+
+
+<h2>2. Recent Windows Updates</h2>
+
+$UpdateHtml
+
+
+<h2>3. Application Patching Status</h2>
+
+$AppHtml
+
+
+<h2>4. Application Inventory</h2>
+
+<p>
+The table below provides the installed version and installation /
+update date for the specifically tracked business applications.
+</p>
+
+$InventoryHtml
+
+
+<h2>5. Other Applications Installed or Updated in $MonthName</h2>
+
+$OtherAppsHtml
+
+
+<div class="footer">
+
+AVD Application Report |
+$ComputerName |
+Generated $RunTime
+
+</div>
+
+</div>
+
 </body>
+
 </html>
 "@
-    $html | Set-Content -Path $ReportPath -Encoding UTF8
-    Write-Host "HTML report saved to: $ReportPath"
-    try { if ($env:USERNAME -ne "SYSTEM") { Start-Process -FilePath $ReportPath -ErrorAction Stop } } catch { Write-Host "Could not auto-open the report: $($_.Exception.Message)" -ForegroundColor DarkGray }
-}
 
-# ----------------- MAIN -----------------
-$results = Get-AppResults -Apps $AppsToCheck
+# ============================================================
+# WRITE HTML REPORT
+# ============================================================
 
-# Console output
-$fmt = "{0,-28} {1,-20} {2,-20} {3,-24} {4,-14}"
-Write-Host ""; Write-Host ($fmt -f "Application","Installed","Latest","Status","Upgrade To")
-Write-Host ("-" * 110)
-foreach ($r in $results) {
-    $fg = "Gray"
-    if     ($r.Status -eq "Up-to-date")                { $fg = "Green" }
-    elseif ($r.Status -eq "Update available")          { $fg = "Red" }
-    elseif ($r.Status -eq "Application not installed") { $fg = "DarkGray" }
-    elseif ($r.Status -like "Unknown*")                { $fg = "Yellow" }
-    Write-Host ($fmt -f $r.Application,$r.Installed,$r.Latest,$r.Status,$r.UpgradeTo) -ForegroundColor $fg
-}
+$HtmlFileName = "$ComputerName-$DateStamp-AVD-Application-Report.html"
 
-# CSV (respect -NoCsv)
-if (-not $NoCsv) {
-    $results | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $CsvPath
-    Write-Host "`nCSV saved to: $CsvPath"
-} else {
-    Write-Host "Skipping CSV output." -ForegroundColor DarkGray
-}
+$LocalHtml = Join-Path `
+    $LocalMonthFolder `
+    $HtmlFileName
 
-# HTML gating BEFORE upgrades (respect -NoHtml)
-$pendingHtml = $false
-if (-not $NoHtml) {
-    # ignore "Application not installed" when deciding if it's green
-    $issuesNow = $results |
-      Where-Object { $_.Status -ne "Application not installed" } |
-      Where-Object { $_.Status -eq "Update available" -or $_.Status -like "Unknown*" }
+$HtmlReport |
+    Out-File `
+        -FilePath $LocalHtml `
+        -Encoding UTF8 `
+        -Force
 
-    if ($HtmlOnlyWhenGreen) {
-        if ($issuesNow.Count -eq 0 -and -not $Upgrade) { Write-ReportHtml -Results $results }
-        elseif ($Upgrade) { $pendingHtml = $true; Write-Host "Skipping HTML for now; will generate after upgrades if everything goes green." -ForegroundColor DarkYellow }
-    } else { Write-ReportHtml -Results $results }
-} else { Write-Host "Skipping HTML report." -ForegroundColor DarkGray }
+# ============================================================
+# COPY TO NETWORK SHARE
+# ============================================================
 
-# Upgrades
-if ($Upgrade) {
-    Invoke-AppUpgrades -Results $results -AppConfig $AppsToCheck -IncludeWindowsUpdate:$IncludeWindowsUpdate -WhatIf:$WhatIf -WindowsOnly:$WindowsUpdateOnly
-    if ($pendingHtml -and -not $NoHtml) {
-        $resultsPost = Get-AppResults -Apps $AppsToCheck
-        $issuesPost  = $resultsPost |
-          Where-Object { $_.Status -ne "Application not installed" } |
-          Where-Object { $_.Status -eq "Update available" -or $_.Status -like "Unknown*" }
-        if ($issuesPost.Count -eq 0) { Write-ReportHtml -Results $resultsPost }
-        else { Write-Host "Still not fully green; HTML not generated. ($($issuesPost.Count) item(s) still need attention.)" -ForegroundColor DarkYellow }
+if ($ShareAvailable) {
+
+    Write-Host "Copying reports to network share..." `
+        -ForegroundColor Yellow
+
+    $FilesToCopy = @(
+
+        $LocalHtml,
+        $AppStatusCSV,
+        $InventoryCSV,
+        $OSInfoCSV,
+        $OSUpdatesCSV,
+        $OtherAppsCSV
+    )
+
+    foreach ($File in $FilesToCopy) {
+
+        try {
+
+            Copy-Item `
+                -Path $File `
+                -Destination $ShareMonthFolder `
+                -Force `
+                -ErrorAction Stop
+        }
+        catch {
+
+            Write-Warning "Unable to copy: $File"
+        }
     }
 }
+
+# ============================================================
+# CONSOLE SUMMARY
+# ============================================================
+
+Write-Host ""
+Write-Host "===============================================" -ForegroundColor Green
+Write-Host " REPORT COMPLETE" -ForegroundColor Green
+Write-Host "===============================================" -ForegroundColor Green
+Write-Host ""
+
+Write-Host "Server:" -NoNewline
+Write-Host " $ComputerName" -ForegroundColor Cyan
+
+Write-Host "Applications discovered:" -NoNewline
+Write-Host " $($InstalledApps.Count)" -ForegroundColor Cyan
+
+Write-Host "Inventory applications:" -NoNewline
+Write-Host " $($InventoryResults.Count)" -ForegroundColor Cyan
+
+Write-Host ""
+Write-Host "Local report:"
+Write-Host $LocalHtml -ForegroundColor Cyan
+
+if ($ShareAvailable) {
+
+    Write-Host ""
+    Write-Host "Network report folder:"
+    Write-Host $ShareMonthFolder -ForegroundColor Cyan
+}
+
+Write-Host ""
+
+# Open report automatically
+Start-Process $LocalHtml
